@@ -16,6 +16,43 @@ Mục tiêu của team là điều khiển các xe trên bản đồ lục giác
 
 ---
 
+## 0. Nguồn của từng điều luật
+
+Mỗi điều dưới đây được gắn nguồn. Đừng tin điều nào không có nguồn.
+
+| Ký hiệu | Nghĩa |
+|---|---|
+| `[observed]` | Chụp từ response thật của server, lưu ở [`docs/observed/`](docs/observed/) |
+| `[main.cpp]` | Suy ra từ code mẫu ban tổ chức |
+| `[chưa xác minh]` | Chưa có bằng chứng — không được xây chiến thuật lên nó |
+
+### Đã xác minh bằng dữ liệu thật
+
+`GET /setup` của một trận luyện tập 8×8 trả về:
+
+```json
+{
+  "startsAt": 1788755244, "players": 2,
+  "daySteps": [32,32,32,32], "daySeconds": [60,60,60,60],
+  "map": {"width": 8, "height": 8, "cells": [[3,2,0,0,0,0,0,0], "..."]},
+  "agents": [3, 63, 45, 42],
+  "spots": [{"brand": 0, "pos": 16, "stocks": 3}, "..."],
+  "fuelLimits": 64,
+  "busyThreshold": 5, "jammedThreshold": 10
+}
+```
+
+Ba điểm dễ hiểu sai:
+
+- **`agents` là mảng int** — vị trí xuất phát, không phải mảng object.
+- **`fuelLimits` là một int** dùng chung, không tách theo loại xe.
+- **`busyThreshold` / `jammedThreshold` lấy từ setup**, không được tự đặt hằng số.
+
+`daySeconds` là ràng buộc chưa từng có trong tài liệu cũ: **60 giây để trả lời
+mỗi ngày**. Mọi tìm kiếm sâu phải nằm gọn trong đó.
+
+---
+
 ## 1. Luật chơi và cách xếp hạng
 
 ### 1.1. Mục tiêu
@@ -26,11 +63,19 @@ Mục tiêu của team là điều khiển các xe trên bản đồ lục giác
 
 Kết quả được so sánh theo thứ tự sau, từ quan trọng nhất đến ít quan trọng hơn:
 
-1. **Số loại udon (`brand`) khác nhau đã thu được**: nhiều hơn thắng.
-2. Nếu bằng nhau, **tổng lũy kế số loại udon theo ngày** cao hơn thắng.
-3. Nếu vẫn bằng nhau, **tổng số phần udon** cao hơn thắng.
-4. Nếu vẫn bằng nhau, **tổng thời gian phản hồi** thấp hơn thắng.
-5. Nếu vẫn hòa, áp dụng luật phụ của ban tổ chức/server.
+`[observed]` — `standings` trong `GET /team/matches` trả về đúng bốn chỉ số này,
+theo đúng thứ tự ưu tiên (xem [`docs/observed/team-matches-standings.json`](docs/observed/team-matches-standings.json)):
+
+| # | Field trong `standings` | Ý nghĩa | Chiều thắng |
+|---:|---|---|---|
+| 1 | `udon_types` | Số loại udon khác nhau | Cao hơn |
+| 2 | `daily_types_sum` | Tổng lũy kế số loại theo ngày | Cao hơn |
+| 3 | `udon_total` | Tổng số phần udon | Cao hơn |
+| 4 | `response_ms_total` | Tổng thời gian phản hồi | **Thấp hơn** |
+
+Bằng chứng: một trận có `team-B` (`udon_types: 1`) xếp trên `team-A`
+(`udon_types: 0`), đúng thứ tự trên. Đội không nối bot vào nhận
+`response_ms_total` bằng số ngày × timeout.
 
 Server tự tính điểm sau khi action được chấp nhận. Bot không gửi điểm.
 
@@ -62,7 +107,12 @@ Quy tắc:
 
 ## 3. Agent và loại xe
 
-`setup` trả về danh sách agent. Action thứ `i` luôn tương ứng với agent thứ `i`; phải giữ nguyên thứ tự này trong mọi payload.
+`[observed]` `setup.agents` là **mảng int**, mỗi phần tử là vị trí xuất phát của
+một xe — ví dụ `[3, 63, 45, 42]` nghĩa là 4 xe. Loại xe do `/assignment` quyết
+định, không nằm trong setup.
+
+Action thứ `i` luôn tương ứng với agent thứ `i`; phải giữ nguyên thứ tự này
+trong mọi payload.
 
 | `kind` | Loại xe | Quyền và giới hạn |
 |---:|---|---|
@@ -129,6 +179,10 @@ Luật bắt buộc:
 - Tổng chi phí bước của mỗi agent không vượt `daySteps[day]`.
 - Xe tuần tra không được vượt giới hạn nhiên liệu.
 - Xe tiếp tế có nhiên liệu vô hạn nhưng vẫn phải tuân thủ giới hạn bước nếu server áp dụng.
+- `[observed]` Ngưỡng chuyển trạng thái đến từ setup: `busyThreshold` (ví dụ `5`)
+  và `jammedThreshold` (ví dụ `10`). Đọc từ setup, không hard-code.
+- `[chưa xác minh]` Đại lượng nào bị đem so với hai ngưỡng đó — số lượt xe đi qua
+  ô trong ngày là phỏng đoán hợp lý nhất nhưng chưa kiểm chứng.
 - Ngày đầu đường bắt đầu thông thoáng; ngày sau traffic phụ thuộc dữ liệu trước đó và lưu lượng di chuyển.
 - Traffic thay đổi chi phí bước, nên route ngày hôm nay không được dùng mù quáng cho ngày mai.
 - Nếu chưa chắc chi phí, dùng route bảo thủ; không chạy sát giới hạn dựa trên phỏng đoán.
@@ -137,11 +191,13 @@ Luật bắt buộc:
 
 ## 5. Spot, brand, stock và thu udon
 
-Mỗi `spot` thường có:
+`[observed]` Mỗi `spot` có đúng ba field:
 
 - `pos`: vị trí spot.
-- `brand`: loại udon.
+- `brand`: loại udon, số nguyên (quan sát được `0..3`).
 - `stocks`: số lượng tồn kho.
+
+Ví dụ thật: `{"brand": 0, "pos": 16, "stocks": 3}`.
 
 Quy tắc:
 
@@ -209,14 +265,32 @@ lọt vào shell history và process list. Chi tiết ở
 
 ### 8.1. Endpoint
 
+**API của bot** — dùng `Authorization: Bearer <token>`:
+
 ```text
-GET  /api/v1/matches/{MATCH_ID}/setup
-POST /api/v1/matches/{MATCH_ID}/assignment
-GET  /api/v1/matches/{MATCH_ID}/start
-GET  /api/v1/matches/{MATCH_ID}/state
-POST /api/v1/matches/{MATCH_ID}/actions
-GET  /api/v1/matches/{MATCH_ID}/result
+GET  /api/v1/matches/{MATCH_ID}/setup       [observed] 200
+POST /api/v1/matches/{MATCH_ID}/assignment  [main.cpp]
+GET  /api/v1/matches/{MATCH_ID}/state       [main.cpp]
+POST /api/v1/matches/{MATCH_ID}/actions     [main.cpp]
+GET  /api/v1/matches/{MATCH_ID}/result      [main.cpp]
+GET  /api/v1/matches/{MATCH_ID}/start       [chưa xác minh] bot mẫu KHÔNG gọi
 ```
+
+**API của web** `[observed]` — dùng để tự tạo trận luyện tập. Auth khác hệ: đăng
+nhập bằng tài khoản đội, **không** dùng token bot.
+
+```text
+POST /auth/login    {"username", "password"}  -> {"token"}
+POST /practice      {}                        -> {"match_id", "your_token",
+                                                  "difficulty", "opponents"}
+GET  /team/matches                            -> {"matches": [{id, status, kind,
+                                                  num_teams, days, standings}]}
+```
+
+`POST /practice` với body rỗng cũng chạy, mặc định `hard` và 1 bot đối thủ.
+`your_token` trả về là token riêng của trận đó, dùng cho các endpoint bot ở trên.
+
+Nhờ vậy CI tự tạo được trận để kiểm chứng bot mà không cần xin ai.
 
 ### 8.2. Header
 

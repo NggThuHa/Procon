@@ -8,6 +8,8 @@ tiếp tế nạp nhiên liệu. Những thứ đó chưa có nguồn từ ban t
 docs/PLAN.md). Mô phỏng chúng theo phỏng đoán sẽ khiến arena chọn sai chiến thuật
 — tệ hơn là không có arena. Mở khoá sau Giai đoạn 0.
 
+Fixture là setup THẬT chụp từ server (fixtures/default.json), không phải bịa.
+
 Không cần API, không cần mạng.
 """
 import copy
@@ -25,8 +27,9 @@ from .rules import KIND_PATROL, TERRAIN_POND, TRAFFIC_CLEAR, move_cost, neighbor
 
 
 class Simulator:
-    def __init__(self, fixture: dict):
-        self._fixture = copy.deepcopy(fixture)
+    def __init__(self, setup: dict):
+        """`setup` đúng shape của `GET /setup` — xem fixtures/default.json."""
+        self._setup = copy.deepcopy(setup)
         self.reset()
 
     @classmethod
@@ -35,7 +38,7 @@ class Simulator:
             return cls(json.load(fh))
 
     def reset(self):
-        setup = copy.deepcopy(self._fixture["setup"])
+        setup = copy.deepcopy(self._setup)
         self.width = setup["map"]["width"]
         self.height = setup["map"]["height"]
         self.cells = [c for row in setup["map"]["cells"] for c in row]
@@ -43,11 +46,17 @@ class Simulator:
             raise ValueError("fixture: map.cells không khớp width*height")
 
         self.day_steps = list(setup["daySteps"])
+        self.day_seconds = list(setup.get("daySeconds") or [])
         self.n_days = len(self.day_steps)
-        self.patrol_fuel = (setup.get("fuelLimits") or {}).get("patrol")
+        # fuelLimits là MỘT int dùng chung, không tách theo loại xe (observed).
+        self.patrol_fuel = setup.get("fuelLimits")
+        # agents là mảng int = vị trí xuất phát, không phải mảng object (observed).
+        self.positions = list(setup["agents"])
         self.spots = copy.deepcopy(setup["spots"])
-        self.positions = [a["pos"] for a in setup["agents"]]
         self.n_agents = len(self.positions)
+        self.busy_threshold = setup.get("busyThreshold")
+        self.jammed_threshold = setup.get("jammedThreshold")
+        self.players = setup.get("players")
         self.kinds = [KIND_PATROL] * self.n_agents
         self.fuel = [self.patrol_fuel] * self.n_agents
         self.traffic = {}

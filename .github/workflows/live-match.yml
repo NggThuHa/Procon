@@ -1,0 +1,85 @@
+name: Trận kiểm chứng
+
+# Chạy một trận luyện tập THẬT trên judge của ban tổ chức để kiểm chứng bot.
+#
+# Cố ý KHÔNG chạy trên mọi push/PR: nó gọi server thật, tốn slot và có thể dính
+# rate limit. Dùng để kiểm chứng, không phải để so hai chiến thuật — so sánh thì
+# dùng arena offline (xem docs/plan/KIENNT.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      difficulty:
+        description: 'Độ khó (easy/medium/hard)'
+        default: hard
+      days:
+        description: 'Số ngày'
+        default: '4'
+  push:
+    tags:
+      - 'bot-*-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-match          # một trận một lúc, không dồn lên judge
+  cancel-in-progress: false
+
+jobs:
+  play:
+    name: Đấu với bot AI của ban tổ chức
+    runs-on: ubuntu-latest
+    # Không có secret (fork, PR từ ngoài) thì bỏ qua thay vì fail.
+    if: github.repository_owner != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Kiểm tra đã cấu hình secret chưa
+        id: check
+        env:
+          U: ${{ secrets.PROCON_USERNAME }}
+        run: |
+          if [ -z "$U" ]; then
+            echo "Chưa đặt secret PROCON_USERNAME/PROCON_PASSWORD — bỏ qua job."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.check.outputs.ok == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build bot
+        if: steps.check.outputs.ok == 'true'
+        working-directory: hexudon-bot-cpp
+        run: make CXXFLAGS='-std=c++17 -O2 -Wall -Wextra -Werror'
+
+      - name: Chạy trận
+        if: steps.check.outputs.ok == 'true'
+        env:
+          PROCON_USERNAME: ${{ secrets.PROCON_USERNAME }}
+          PROCON_PASSWORD: ${{ secrets.PROCON_PASSWORD }}
+        run: |
+          python3 -m tools.live_match \
+            --bot hexudon-bot-cpp/bot \
+            --difficulty '${{ inputs.difficulty || ''hard'' }}' \
+            --days '${{ inputs.days || ''4'' }}' \
+            --timeout 600 \
+            --out match-result.md
+
+      - name: Đưa bảng điểm vào tóm tắt job
+        if: steps.check.outputs.ok == 'true' && always()
+        run: cat match-result.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Lưu bảng điểm
+        if: steps.check.outputs.ok == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: match-result
+          path: match-result.md
+          if-no-files-found: ignore
