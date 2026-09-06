@@ -1,0 +1,85 @@
+{
+  "matches": [
+    {
+      "id": "m-11477",
+      "status": "done",
+      "kind": "practice",
+      "num_teams": 2,
+      "days": 4,
+      "created_at": "2026-09-06T14:18:50.637988Z",
+      "standings": [
+        {
+          "rank": 1,
+          "team_id": "team-B",
+          "udon_types": 1,
+          "daily_types_sum": 4,
+          "udon_total": 8,
+          "response_ms_total": 1337
+        },
+        {
+          "rank": 2,
+          "team_id": "team-A",
+          "udon_types": 0,
+          "daily_types_sum": 0,
+          "udon_total": 0,
+          "response_ms_total": 20000
+        }
+      ],
+      "team_id": "team-A"
+    },
+    {
+      "id": "m-11523",
+      "status": "done",
+      "kind": "practice",
+      "num_teams": 2,
+      "days": 4,
+      "created_at": "2026-09-06T15:50:49.150669Z",
+      "standings": [
+        {
+          "rank": 1,
+          "team_id": "team-B",
+          "udon_types": 1,
+          "daily_types_sum": 4,
+          "udon_total": 6,
+          "response_ms_total": 1420
+        },
+        {
+          "rank": 2,
+          "team_id": "team-A",
+          "udon_types": 0,
+          "daily_types_sum": 0,
+          "udon_total": 0,
+          "response_ms_total": 20000
+        }
+      ],
+      "team_id": "team-A"
+    },
+    {
+      "id": "m-11524",
+      "status": "done",
+      "kind": "practice",
+      "num_teams": 2,
+      "days": 4,
+      "created_at": "2026-09-06T15:53:22.213915Z",
+      "standings": [
+        {
+          "rank": 1,
+          "team_id": "team-B",
+          "udon_types": 1,
+          "daily_types_sum": 4,
+          "udon_total": 8,
+          "response_ms_total": 1658
+        },
+        {
+          "rank": 2,
+          "team_id": "team-A",
+          "udon_types": 0,
+          "daily_types_sum": 0,
+          "udon_total": 0,
+          "response_ms_total": 20000
+        }
+      ],
+      "team_id": "team-A"
+    }
+  ]
+}

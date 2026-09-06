@@ -1,0 +1,27 @@
+{
+  "id": "m-11542",
+  "status": "done",
+  "kind": "practice",
+  "num_teams": 2,
+  "days": 4,
+  "created_at": "2026-09-06T16:54:09.096648Z",
+  "standings": [
+    {
+      "rank": 1,
+      "team_id": "team-B",
+      "udon_types": 4,
+      "daily_types_sum": 16,
+      "udon_total": 59,
+      "response_ms_total": 1229
+    },
+    {
+      "rank": 2,
+      "team_id": "team-A",
+      "udon_types": 1,
+      "daily_types_sum": 4,
+      "udon_total": 4,
+      "response_ms_total": 986
+    }
+  ],
+  "team_id": "team-A"
+}

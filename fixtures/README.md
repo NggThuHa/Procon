@@ -1,29 +1,44 @@
 # fixtures/
 
-Dữ liệu mẫu để chạy local/mock server và test deterministic. Đây là điểm mà
-`FIXTURE` trong [`.env.example`](../.env.example) trỏ tới.
+Dữ liệu để chạy simulator offline.
 
 ## `default.json`
 
-Map 7×5, 3 agent (2 tuần tra + 1 tiếp tế), 4 spot với 3 brand, 5 ngày.
-Có sẵn ao (`terrain = 3`), đường (`1`) và núi (`2`) để kiểm thử adjacency,
-`E_POND`, chi phí bước và fuel.
+**Đây là setup THẬT**, chụp nguyên văn từ `GET /setup` của một trận luyện tập
+8×8 (`docs/observed/setup-practice-8x8.json`). Không phải dữ liệu bịa.
 
-- `setup` — payload mẫu cho `GET /setup`.
-- `state` — payload mẫu cho `GET /state` ở ngày 0.
+| Field | Giá trị | Ý nghĩa |
+|---|---|---|
+| `map` | 8×8, terrain `0..3` | 0 đất, 1 đường, 2 núi, 3 ao |
+| `agents` | `[3, 63, 45, 42]` | **mảng int = vị trí xuất phát**, không phải object |
+| `fuelLimits` | `64` | **một int duy nhất**, không tách theo loại xe |
+| `daySteps` | `[32,32,32,32]` | ngân sách bước mỗi ngày |
+| `daySeconds` | `[60,60,60,60]` | giới hạn giây để trả lời mỗi ngày |
+| `spots` | 8 spot, `brand` 0..3 | `{brand, pos, stocks}` |
+| `players` | `2` | số đội trong trận |
+| `busyThreshold` / `jammedThreshold` | `5` / `10` | ngưỡng chuyển trạng thái traffic |
 
-## ASSUMPTION
+## Lấy fixture mới
 
-Cấu trúc file này được suy ra từ [`README.md`](../README.md) của repo, **không**
-phải từ response thật của ban tổ chức. Trước khi tin vào một field:
+```bash
+set -a; . ./.env; set +a
+TOKEN=$(curl -s -X POST https://procon.ptit.edu.vn/auth/login \
+  -H 'Content-Type: application/json' \
+  -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}" | jq -r .token)
+M=$(curl -s -X POST https://procon.ptit.edu.vn/practice \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}')
+MID=$(echo "$M" | jq -r .match_id); MT=$(echo "$M" | jq -r .your_token)
+curl -s "https://procon.ptit.edu.vn/api/v1/matches/$MID/setup" \
+  -H "Authorization: Bearer $MT" | jq . > fixtures/default.json
+```
 
-- Đối chiếu với `/setup` và `/state` thật khi có quyền truy cập.
-- Nếu server trả khác, sửa fixture theo server — server là nguồn sự thật.
+## Còn thiếu
 
-Các điểm chưa xác minh: tên/kiểu của `fuelLimits`, cách `brand` được mã hóa
-(số hay chuỗi), và schema đầy đủ của `traffics` và `others`.
+Chưa chụp được `GET /state` (cần bot nối vào trận đang chạy). Shape của
+`state`, `traffics` và `others` vẫn chưa xác minh.
 
 ## Quy tắc
 
-- Không đưa `API_TOKEN`, Authorization header hay dữ liệu thật vào fixture.
-- Snapshot runtime thuộc `.snapshots/` và không được commit.
+- Không đưa token vào fixture. `your_token` của trận và token đăng nhập không
+  bao giờ được commit.
+- Snapshot runtime thuộc `.snapshots/`, không commit.

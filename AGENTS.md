@@ -2,29 +2,46 @@
 
 ## Mục tiêu repo
 
-Repo dùng để phát triển bot/engine Procon và kiểm thử luật trên localhost/mock server. Không yêu cầu deploy public.
+Repo dùng để cải tiến chiến thuật cho bot Procon. Tầng transport (HTTP, JSON,
+vòng đời trận) do ban tổ chức cung cấp sẵn ở `hexudon-bot-cpp/` và đã chạy được —
+**không xây lại**. Điểm chỉ đến từ `planActions()`.
+
+## Cảnh báo: phần lớn "luật" trong README chưa có nguồn
+
+Mục Luật chơi trong `README.md` do AI viết ở commit `8d98369`, không phải trích
+từ đặc tả ban tổ chức. `brand`, `stocks`, thứ tự xếp hạng và toàn bộ mã lỗi `E_*`
+**không xuất hiện một lần nào** trong code mẫu BTC.
+
+Không khẳng định những thứ đó là luật. Không tối ưu chiến thuật dựa trên chúng
+cho tới khi Giai đoạn 0 trong `docs/PLAN.md` hoàn tất.
 
 ## Tài liệu bắt buộc đọc
 
 Theo thứ tự:
 
 1. [`README.md`](README.md) — giới thiệu và luật chơi.
-2. [`PLAN.md`](PLAN.md) — phân công và quy trình phối hợp.
+2. [`PLAN.md`](docs/PLAN.md) — phân công và quy trình phối hợp.
 3. [`docs/plan/KIENNT.md`](docs/plan/KIENNT.md) — vai trò KIENNT (tôi): API, localhost, vận hành.
 4. [`docs/plan/DATNT.md`](docs/plan/DATNT.md) — vai trò DATNT: map, route, validator.
 
 ## Vai trò hiện tại
 
-- **KIENNT (tôi):** local/mock server, API client, fixtures, snapshot, log, retry, rate limit và integration flow.
-- **DATNT:** luật, map lục giác, mục tiêu brand/spot, route, simulator và validator.
+- **KIENNT (tôi):** chọn mục tiêu và chấm điểm — *đi đâu thì đáng*. Sở hữu
+  simulator và arena. Bậc 2 (gán Hungarian) và bậc 4 (beam search).
+- **DATNT:** bản đồ, đường đi, điều phối xe — *đi thế nào cho kịp*. Sở hữu
+  `strategy/common.hpp`. Bậc 1 (Dijkstra), 3 (rolling horizon), 5 (ALNS).
+
+Thang bậc đầy đủ ở `docs/strategies.md`. Các bậc **xếp chồng lên nhau**, không
+phải hai bot cạnh tranh.
 
 Không được tự đổi vai trò hoặc phân công nếu chưa có yêu cầu mới.
 
 ## Quy tắc làm việc
 
-- Ưu tiên localhost: `http://localhost:<PORT>`.
-- Không hard-code URL production và không yêu cầu deploy public.
-- Không gọi Internet/server thi đấu thật trong test mặc định.
+- Không hard-code URL production; lấy base URL từ tham số dòng lệnh/environment.
+- Không gọi server thi đấu thật trong test mặc định. Simulator chạy offline,
+  không cần mạng và không cần token.
+- Không tự tạo thêm tài khoản/token trên judge để tập nếu chưa hỏi ban tổ chức.
 - Không đọc, in, commit hoặc đưa secret vào fixture/log/payload.
 - Không đoán luật khi thiếu dữ liệu; ghi rõ `ASSUMPTION` và hỏi người phụ trách.
 - Không sửa rộng ngoài phạm vi yêu cầu.
@@ -39,29 +56,25 @@ Không được tự đổi vai trò hoặc phân công nếu chưa có yêu c�
 - State mới nhất có quyền ưu tiên hơn route cũ.
 - Một lỗi trong action có thể làm cả submission bị từ chối.
 - Timeout không chứng minh request chưa được nhận; không retry action mù quáng.
-- Mock server phải có test cho `E_NOT_ADJACENT`, `E_POND`, `E_STEP_OVERFLOW`, `E_NO_FUEL`, `E_BAD_FORMAT` và rate limit.
+- Simulator chỉ mô phỏng phần đã xác minh từ `main.cpp`: tính hợp lệ nước đi,
+  chi phí bước, nhiên liệu. Không mô phỏng điểm số theo phỏng đoán.
+- Mọi thay đổi chiến thuật phải kèm số đo arena trước/sau. Không có số, không merge.
 
 ## Quy ước thay đổi
 
-### Nếu làm phần KIENNT
+### Mỗi chiến thuật một nhánh, một release
 
-- Dùng nhánh `kien/infra-local`.
-- Ưu tiên file local server, API client, fixture, snapshot và runtime.
-- Cập nhật `docs/plan/KIENNT.md` khi hoàn thành milestone hoặc phát hiện giả định mới.
+- Nhánh: `strategy/<tên>` · Tag: `bot-<tên>-v<N>` · File: `strategy/<tên>.hpp`
+- Nhánh chiến thuật chỉ chạm file của nó + một dòng đăng ký trong dispatcher.
+- Sửa `strategy/common.hpp` phải tách PR riêng — nó ảnh hưởng mọi chiến thuật.
+- Cập nhật file plan của người phụ trách khi xong milestone hoặc phát hiện giả định mới.
 
-### Nếu làm phần DATNT
+### Khi tích hợp
 
-- Dùng nhánh `dat/route-planner`.
-- Ưu tiên map model, target selection, route planner, validator và simulator.
-- Cập nhật `docs/plan/DATNT.md` khi hoàn thành milestone hoặc phát hiện giả định mới.
-
-### Khi tích hợp hai phần
-
-1. KIENNT cung cấp fixture/state local rõ schema.
-2. DATNT tạo action và ghi `VALIDATION: PASS`.
-3. KIENNT kiểm tra tích hợp rồi mới gọi `/actions` local.
-4. Lưu response/state sau action.
-5. Chạy test và kiểm tra secret leak.
+1. Chạy validator trên action trước khi gửi.
+2. Chạy arena trên toàn bộ bộ map thử nghiệm, ghi lại điểm.
+3. So với bản trước; kém hơn thì không merge.
+4. Kiểm tra không lộ secret.
 
 ## Cách báo cáo
 
