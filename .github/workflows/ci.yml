@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    name: Validate repository docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check required files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in README.md PLAN.md AGENTS.md docs/plan/KIENNT.md docs/plan/DATNT.md .env.example; do
+            test -f "$f" || { echo "Missing required file: $f"; exit 1; }
+          done
+
+      - name: Check markdown links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --offline '**/*.md'
+          fail: true
+
+      - name: Check for secrets and production URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nE 'Bearer[[:space:]]+[A-Za-z0-9._-]{12,}|(API_TOKEN|SECRET|PASSWORD)[[:space:]]*=[[:space:]]*[^<[:space:]]+' -- ':!*.example' ':!.env.example' ':!AGENTS.md' ':!README.md' ':!PLAN.md' ':!docs/**'; then
+            echo 'Potential secret found in tracked files.'
+            exit 1
+          fi
+          if git grep -nE 'https?://(www\.)?procon\.ptit\.edu\.vn' -- '*.py' '*.js' '*.ts' '*.go' '*.rs' '*.java' '*.c' '*.cc' '*.cpp' '*.h' '*.hpp' '*.json' '*.yaml' '*.yml'; then
+            echo 'Production URL must not be hard-coded in source/config.'
+            exit 1
+          fi
+
+      - name: Check .env is not tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo '.env must never be committed.'
+            exit 1
+          fi
+
+  build-bot:
+    name: Build C++ bot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build with warnings as errors
+        working-directory: hexudon-bot-cpp
+        run: make CXXFLAGS='-std=c++17 -O2 -Wall -Wextra -Werror'
+
+      - name: Smoke test (usage exits 2, no network)
+        working-directory: hexudon-bot-cpp
+        run: |
+          set -euo pipefail
+          rc=0
+          ./bot >/dev/null 2>stderr.txt || rc=$?
+          test "$rc" -eq 2 || { echo "expected exit 2, got $rc"; cat stderr.txt; exit 1; }
+          grep -q '<URL>' stderr.txt

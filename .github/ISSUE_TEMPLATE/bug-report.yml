@@ -1,0 +1,62 @@
+name: Bug report
+description: Báo lỗi trong local/mock server, API client, route hoặc validator.
+title: "[BUG] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Vui lòng không dán API token, Authorization header hoặc dữ liệu nhạy cảm vào issue.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Khu vực
+      options:
+        - KIENNT — local/mock server/API
+        - KIENNT — snapshot/log/retry
+        - DATNT — map/route
+        - DATNT — validator/simulator
+        - Tài liệu
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Mô tả lỗi
+      description: Nêu hiện tượng, không nêu secret.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Cách tái hiện
+      placeholder: |
+        1. Khởi động local server...
+        2. Dùng fixture...
+        3. Gửi action...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Kết quả mong đợi
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Kết quả thực tế
+    validations:
+      required: true
+  - type: input
+    id: fixture
+    attributes:
+      label: Fixture hoặc snapshot
+      description: Chỉ ghi tên/path an toàn, không dán nội dung có secret.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log đã sanitize
+      description: Xóa token, Authorization và dữ liệu nhạy cảm trước khi gửi.
+      render: text

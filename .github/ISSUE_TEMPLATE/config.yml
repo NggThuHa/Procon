@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Luật chơi và hướng dẫn
+    url: https://github.com/ngtukien/Procon/blob/main/README.md
+    about: Xem README.md, PLAN.md và AGENTS.md trước khi mở issue.

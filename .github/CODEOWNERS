@@ -1,0 +1,16 @@
+# Review mặc định theo ranh giới trách nhiệm trong PLAN.md.
+# Thay <github-user-cua-DATNT> bằng username thật rồi bỏ comment các dòng DATNT.
+
+# KIENNT — local/mock server, API client, snapshot, log, retry, CI
+/.github/            @ngtukien
+/fixtures/           @ngtukien
+/hexudon-bot-cpp/    @ngtukien
+/docs/plan/KIENNT.md @ngtukien
+
+# DATNT — map, route, validator, simulator
+# /docs/plan/DATNT.md  @<github-user-cua-DATNT>
+
+# Tài liệu luật và điều phối: cả hai cùng review
+# /README.md  @ngtukien @<github-user-cua-DATNT>
+# /PLAN.md    @ngtukien @<github-user-cua-DATNT>
+# /AGENTS.md  @ngtukien @<github-user-cua-DATNT>

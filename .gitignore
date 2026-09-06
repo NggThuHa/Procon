@@ -1,0 +1,30 @@
+.env
+.env.*
+!.env.example
+
+# Runtime data
+.snapshots/
+logs/
+*.log
+
+# Local tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+.venv/
+venv/
+node_modules/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# C++ build artifacts
+hexudon-bot-cpp/bot
+hexudon-bot-cpp/bot.exe
+*.o
+*.obj
+*.d
+compile_commands.json

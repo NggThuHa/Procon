@@ -1,0 +1,42 @@
+name: Feature request
+description: Đề xuất cải thiện bot, mock server, chiến thuật hoặc tài liệu.
+title: "[FEAT] "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Người phụ trách
+      options:
+        - KIENNT — infra/local/API
+        - DATNT — route/validator
+        - Phối hợp
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Vấn đề cần giải quyết
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Đề xuất
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Tiêu chí hoàn thành
+      placeholder: |
+        - [ ] Có test local
+        - [ ] Không ảnh hưởng secret
+        - [ ] Cập nhật tài liệu liên quan
+    validations:
+      required: true
+  - type: textarea
+    id: assumptions
+    attributes:
+      label: Giả định hoặc câu hỏi còn mở
