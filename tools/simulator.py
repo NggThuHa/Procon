@@ -72,18 +72,32 @@ class Simulator:
         ]
 
     def state(self):
+        """Đúng shape của `GET /state` thật — xem docs/observed/probe-state-day0.json.
+
+        CỐ Ý không trả `spots`/`stocks`: server thật KHÔNG gửi chúng trong state.
+        Bot phải tự theo dõi tồn kho từ `/setup` cộng với những gì mình đã thu.
+        Nếu simulator phát không cho chiến thuật, chiến thuật sẽ chạy được ở nhà
+        và gãy ở trận thật.
+        """
         return {
+            "endsAt": 0,
             "day": self.day,
             "agents": [
                 {"kind": self.kinds[i], "pos": self.positions[i], "fuel": self.fuel[i]}
                 for i in range(self.n_agents)
             ],
+            "others": [],
             "traffics": [
                 {"pos": p, "status": s} for p, s in sorted(self.traffic.items())
             ],
-            "spots": copy.deepcopy(self.spots),
-            "daySteps": self.day_steps[self.day] if self.day < self.n_days else 0,
         }
+
+    def stocks_snapshot(self):
+        """Tồn kho hiện tại — CHỈ dùng để chấm điểm/kiểm thử, không phải state.
+
+        Chiến thuật không được gọi hàm này: server thật không cho biết.
+        """
+        return copy.deepcopy(self.spots)
 
     def finished(self):
         return self.day >= self.n_days

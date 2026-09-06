@@ -1,8 +1,24 @@
 """Lỗi khi một chuỗi lệnh không hợp lệ.
 
 CẢNH BÁO: các mã `E_*` dưới đây là **tên do team đặt**, KHÔNG phải mã lỗi của
-ban tổ chức. Grep code mẫu BTC: không có mã nào trong số này xuất hiện. Bot mẫu
-chỉ phân biệt HTTP 200/425/429. Khi biết mã thật, đổi ở đây một chỗ.
+ban tổ chức.
+
+`[observed]` Server thật KHÔNG dùng mã lỗi. `POST /actions` luôn trả 200 kèm:
+
+    {"protocol_version": "v0.1-draft", "type": "action_result",
+     "match_id": "m-11542", "day": 1, "valid": true, "reason": "",
+     "submission_id": "team-A-d1-2", "response_ms": 95}
+
+Hợp lệ hay không nằm ở `valid` (bool) và `reason` (chuỗi tự do), không phải
+ở HTTP status hay mã lỗi. Nghĩa là:
+
+- Không được coi `POST /actions` trả 200 là action đã được chấp nhận —
+  phải đọc `valid`.
+- `response_ms` chính là thứ cộng dồn thành `response_ms_total`, tiêu chí
+  xếp hạng thứ 4.
+
+Các mã dưới đây chỉ dùng nội bộ trong simulator để nói rõ *vì sao* một chuỗi
+lệnh bị từ chối. Đừng so chúng với chuỗi `reason` của server.
 """
 
 

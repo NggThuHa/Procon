@@ -328,6 +328,46 @@ GET  /team/matches                            -> {"matches": [{id, status, kind,
 
 Nhờ vậy CI tự tạo được trận để kiểm chứng bot mà không cần xin ai.
 
+### 8.1b. Shape thật của `/state` và `/actions`
+
+`[observed]` `GET /state` — xem [`docs/observed/probe-state-day0.json`](docs/observed/probe-state-day0.json):
+
+```json
+{
+  "endsAt": 1788713709,
+  "day": 0,
+  "agents":  [{"kind": 0, "pos": 1, "fuel": 64}, "..."],
+  "others":  [{"id": 1, "agents": [{"kind": 0, "pos": 1, "fuel": 64}, "..."]}],
+  "traffics":[{"pos": 24, "status": 0}, "..."]
+}
+```
+
+Hai điều quan trọng:
+
+- **`/state` KHÔNG có `spots` hay `stocks`.** Chỉ `/setup` cho biết tồn kho ban
+  đầu. Bot phải **tự theo dõi** đã thu gì ở đâu. Đây là ràng buộc thiết kế lớn
+  cho tầng chọn mục tiêu.
+- **`others` là thật** — thấy được vị trí, loại xe và nhiên liệu của đội bạn.
+  Có đối kháng, và quan sát được đối thủ.
+
+`[observed]` `POST /actions` — **luôn trả HTTP 200**, kết quả nằm trong body:
+
+```json
+{
+  "protocol_version": "v0.1-draft", "type": "action_result",
+  "match_id": "m-11542", "day": 1,
+  "valid": true, "reason": "",
+  "submission_id": "team-A-d1-2", "response_ms": 95
+}
+```
+
+- Hợp lệ hay không nằm ở **`valid`**, không phải HTTP status. Coi 200 là thành
+  công sẽ nuốt mất lỗi.
+- `reason` là **chuỗi tự do**, không phải mã lỗi. Mọi mã `E_*` trong repo này là
+  tên nội bộ do team đặt, không phải của ban tổ chức.
+- `response_ms` là thứ cộng dồn thành `response_ms_total` — tiêu chí xếp hạng
+  thứ 4.
+
 ### 8.2. Header
 
 ```http

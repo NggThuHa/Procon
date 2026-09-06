@@ -1,0 +1,87 @@
+{
+  "endsAt": 1788713709,
+  "day": 0,
+  "agents": [
+    {
+      "kind": 0,
+      "pos": 1,
+      "fuel": 64
+    },
+    {
+      "kind": 0,
+      "pos": 57,
+      "fuel": 64
+    },
+    {
+      "kind": 0,
+      "pos": 17,
+      "fuel": 64
+    },
+    {
+      "kind": 0,
+      "pos": 42,
+      "fuel": 64
+    }
+  ],
+  "others": [
+    {
+      "id": 1,
+      "agents": [
+        {
+          "kind": 0,
+          "pos": 1,
+          "fuel": 64
+        },
+        {
+          "kind": 0,
+          "pos": 57,
+          "fuel": 64
+        },
+        {
+          "kind": 0,
+          "pos": 17,
+          "fuel": 64
+        },
+        {
+          "kind": 1,
+          "pos": 42,
+          "fuel": 64
+        }
+      ]
+    }
+  ],
+  "traffics": [
+    {
+      "pos": 24,
+      "status": 0
+    },
+    {
+      "pos": 25,
+      "status": 0
+    },
+    {
+      "pos": 26,
+      "status": 0
+    },
+    {
+      "pos": 27,
+      "status": 0
+    },
+    {
+      "pos": 36,
+      "status": 0
+    },
+    {
+      "pos": 37,
+      "status": 0
+    },
+    {
+      "pos": 38,
+      "status": 0
+    },
+    {
+      "pos": 39,
+      "status": 0
+    }
+  ]
+}
