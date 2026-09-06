@@ -247,7 +247,43 @@ Phát triển và kiểm thử mặc định trên **localhost hoặc mock serve
 - Không hard-code production URL; lấy base URL từ environment/config.
 - Chỉ kết nối server thi đấu khi team chủ động xác nhận và có cấu hình riêng.
 
-### 7.1. Chạy bot mẫu
+### 7.1. Bot mẫu KHÔNG kết nối được judge thật
+
+`[observed]` Đây là chặn đầu tiên phải gỡ.
+
+`hexudon-bot-cpp/http.hpp` **không có TLS**, và `parseBase` cắt scheme rồi mặc
+định cổng `80`. Đưa cho nó `https://procon.ptit.edu.vn` thì nó nối cổng 80,
+nhận `301`, in lỗi rồi thoát:
+
+```
+GET /setup -> HTTP 301 (token sai / match khong hop le?)
+```
+
+Hậu quả đã thấy trong `standings`: đội mình `udon_types: 0`,
+`response_ms_total: 240000` (= số ngày × `daySeconds` × 1000) ở **mọi** trận
+luyện tập — bot chưa từng chơi một ngày nào.
+
+Cách gỡ, theo thứ tự nên thử:
+
+1. **Proxy TLS ở local** — không sửa code bot:
+
+   ```bash
+   python3 -m tools.tls_proxy --port 8099 &
+   ./hexudon-bot-cpp/bot http://127.0.0.1:8099 <MATCH_ID> <TOKEN>
+   ```
+
+   Proxy sửa lại header `Host` cho đúng vhost, nếu không nginx trả sai.
+
+2. **Hỏi ban tổ chức** — bot mẫu của chính họ không nói được TLS, nên hoặc có
+   cổng HTTP thường cho bot, hoặc phải dùng `sample-bot` bản khác. Trang web
+   gợi ý lệnh `sample-bot -transport http|ws -url https://...`, tức là **có một
+   bot mẫu khác** biết TLS và WebSocket mà repo này chưa có.
+
+3. **Thêm TLS vào `http.hpp`** — link OpenSSL. Mất tính "không thư viện ngoài".
+
+`[chưa xác minh]` Transport WebSocket (`-transport ws`) chưa thử.
+
+### 7.2. Chạy bot mẫu
 
 ```bash
 cd hexudon-bot-cpp

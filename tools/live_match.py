@@ -91,6 +91,9 @@ def render(match):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bot", default="hexudon-bot-cpp/bot")
+    ap.add_argument("--bot-url", default=None,
+                    help="URL bot dùng để nối. Bot mẫu không có TLS nên phải "
+                         "trỏ qua tools.tls_proxy, ví dụ http://127.0.0.1:8099")
     ap.add_argument("--days", type=int)
     ap.add_argument("--difficulty")
     ap.add_argument("--timeout", type=int, default=600)
@@ -101,9 +104,13 @@ def main():
     match = create_practice(token, {"days": args.days, "difficulty": args.difficulty})
     mid, mtoken = match["match_id"], match["your_token"]
 
-    print(f"chạy bot: {args.bot}")
+    bot_url = args.bot_url or BASE
+    if bot_url.startswith("https://"):
+        print("CẢNH BÁO: bot mẫu không hỗ trợ TLS; dùng --bot-url qua tls_proxy",
+              file=sys.stderr)
+    print(f"chạy bot: {args.bot} -> {bot_url}")
     bot = subprocess.Popen(
-        [args.bot, BASE, mid, mtoken],
+        [args.bot, bot_url, mid, mtoken],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
     )
     try:
