@@ -1,152 +1,124 @@
-# KIENNT — Kế hoạch phụ trách API, localhost và vận hành
+# KIENNT — Chọn mục tiêu, chấm điểm và công cụ đo
 
 ## Vai trò
 
-KIENNT (tôi) phụ trách **API client, mock/localhost server, snapshot, log, retry và vận hành an toàn**. DATNT phụ trách map, chiến thuật, route và validator.
+Trả lời câu hỏi **"đi đâu thì đáng"**: nhìn state, quyết định mỗi xe nên nhắm
+spot nào. DATNT trả lời "đi thế nào cho kịp".
 
-- Nhánh làm việc: `kien/infra-local`
-- File cập nhật kết quả: `docs/plan/KIENNT.md`
-- Luật bắt buộc: [`README.md`](../../README.md)
-- Quy ước phối hợp: [`PLAN.md`](../../PLAN.md)
-- Môi trường mặc định: `http://localhost:<PORT>` hoặc mock server
+Ngoài ra sở hữu **công cụ đo** — simulator và arena — vì mọi quyết định chiến
+thuật của cả hai người đều phải được chấm bằng công cụ này.
 
-## Nguyên tắc vận hành
+- Nhánh: `kien/strategy-greedy`
+- Chiến thuật sở hữu: `strategy/greedy_day.hpp`
+- Luật: [`README.md`](../../README.md) · Phối hợp: [`PLAN.md`](../PLAN.md)
 
-1. Phát triển và kiểm thử trên localhost/mock server; không yêu cầu deploy public.
-2. Không hard-code production URL; base URL phải lấy từ environment/config.
-3. Không chạy action nếu chưa kiểm tra `MATCH_ID`, `DAY`, schema và `VALIDATION: PASS` từ DATNT.
-4. Timeout không đồng nghĩa request chưa được local/mock server nhận; không retry mù quáng.
-5. Snapshot phải đủ để khôi phục client sau restart.
-6. Mock server phải giữ hành vi gần luật thật và mô phỏng lỗi để DATNT kiểm thử.
-7. Không ghi secret vào log, fixture, snapshot hoặc file bàn giao.
+> Vai trò cũ (mock server, API client, snapshot, retry) đã bị cắt. Lý do trong
+> [`PLAN.md`](../PLAN.md): BTC đã giải xong tầng transport.
 
-## Công việc cụ thể
+---
 
-### K1 — Local/mock server
+## Giai đoạn 0 — Phần việc của KIENNT
 
-- [ ] Chọn cách chạy server local đơn giản, có lệnh start rõ ràng.
-- [ ] Cho phép cấu hình `HOST`, `PORT`, fixture và delay qua environment.
-- [ ] Implement các endpoint local: `/setup`, `/assignment`, `/start`, `/state`, `/actions`, `/result`.
-- [ ] Ưu tiên bind `localhost`; không mặc định mở public interface.
-- [ ] Cung cấp fixture map, agents, spots, traffic, daySteps và fuelLimits.
-- [ ] Có cơ chế reset trận để chạy lại test deterministic.
-- [ ] Mô phỏng lỗi adjacency, pond, step, fuel, format và rate limit.
+- [ ] Hỏi BTC: **cách tính điểm chính xác**. Đây là thứ chặn toàn bộ tầng chọn
+      mục tiêu — không biết chấm điểm thế nào thì không biết "đáng" nghĩa là gì.
+- [ ] Hỏi BTC: `brand` và `stocks` có thật không, kiểu dữ liệu gì, nạp lại ra sao.
+- [ ] Hỏi BTC: có judge để tập không, giới hạn bao nhiêu.
+- [ ] Chạy bot mẫu một trận, lưu `/setup` và `/state` nguyên văn vào
+      `docs/observed/`.
 
-**Đầu ra:** local server chạy được bằng một lệnh và fixture tái lập được.
+---
 
-### K2 — API client
+## Giai đoạn 1 — Simulator và arena
 
-- [ ] Đọc `BASE_URL` từ environment; mặc định localhost.
-- [ ] Tạo wrapper cho `/setup`, `/assignment`, `/start`, `/state`, `/actions`, `/result`.
-- [ ] Kiểm tra status code và schema response.
-- [ ] Đo request duration nhưng không log token/header.
-- [ ] Phân loại validation error, server error, timeout và rate limit.
-- [ ] Có mock adapter để test mà không cần mạng.
+Đây là phần hạ tầng **duy nhất** còn sống, và nó sống vì một lý do cụ thể: không
+có cách nào khác để biết chiến thuật A có hơn chiến thuật B không.
 
-### K3 — Snapshot và log
+Phân biệt rõ với thứ đã cắt:
 
-- [ ] Lưu setup snapshot bất biến.
-- [ ] Lưu state trước action, response action và state sau action.
-- [ ] Mỗi snapshot có match, day, timestamp, endpoint, status và duration.
-- [ ] Sanitize Authorization/API token trước khi ghi hoặc gửi cho DATNT.
-- [ ] Có thể khôi phục trạng thái làm việc sau khi client restart.
-- [ ] Không đưa snapshot runtime chứa dữ liệu nhạy cảm vào Git.
+| | Mock server (đã cắt) | Simulator (giữ) |
+|---|---|---|
+| Giả lập | Đường truyền HTTP | Luật trò chơi |
+| Thay thế | `http.hpp` — BTC đã làm xong | Không có gì thay được |
+| Dùng để | Không gì cả | Chấm điểm chiến thuật offline |
 
-### K4 — Assignment và vòng đời trận
+### S1 — Simulator
 
-- [ ] Validate assignment đúng số agent và `kind` hợp lệ.
-- [ ] Gọi assignment một lần, không đổi kind sau khi accepted.
-- [ ] Poll `/start` với delay cấu hình được.
-- [ ] Điều phối state/action/result đúng thứ tự.
-- [ ] Chặn action nếu day hoặc state không khớp.
-- [ ] Chạy toàn bộ flow bằng local fixture trước khi tích hợp thật.
+- [ ] Nhận `(map, setup, chiến thuật)` → chạy hết số ngày → trả điểm.
+- [ ] Chỉ mô phỏng phần **đã xác minh**: tính hợp lệ của nước đi, chi phí bước,
+      nhiên liệu. Phần chấm điểm để sau Giai đoạn 0.
+- [ ] Mỗi giả định chưa xác minh phải là một hằng số đặt riêng một chỗ, không rải
+      khắp code — để sửa một lần khi có luật thật.
+- [ ] Deterministic: cùng input phải ra cùng output.
 
-### K5 — Retry, rate limit và lỗi
+### S2 — Bộ map thử nghiệm
 
-- [ ] Mô phỏng `429`/`E_RATE_LIMIT` và backoff có giới hạn.
-- [ ] Không retry `/actions` khi request trước ở trạng thái unknown.
-- [ ] Sau timeout, lấy lại state/response trước khi quyết định.
-- [ ] Ghi correlation id nếu có.
-- [ ] Không gửi duplicate action trong cùng day.
-- [ ] Giữ timeout connect và response riêng biệt.
+Không tối ưu trên một fixture duy nhất. Cần ít nhất các dạng:
 
-### K6 — Kiểm thử tích hợp với DATNT
+- [ ] Map nhiều đường vs map nhiều núi/ao.
+- [ ] Ngân sách bước chặt vs rộng.
+- [ ] Nhiên liệu chặt (bắt buộc dùng xe tiếp tế) vs rộng.
+- [ ] Trận ngắn (3–5 ngày) vs dài (15+ ngày).
+- [ ] Spot tập trung một góc vs rải đều.
 
-- [ ] Setup fixture thiếu field.
-- [ ] Assignment/action sai số lượng agent.
-- [ ] Action bị DATNT validator từ chối.
-- [ ] Action hợp lệ được áp dụng và state thay đổi đúng.
-- [ ] Các lỗi `E_NOT_ADJACENT`, `E_POND`, `E_STEP_OVERFLOW`, `E_NO_FUEL`, `E_BAD_FORMAT`.
-- [ ] Timeout, rate limit và restart từ snapshot.
-- [ ] Kiểm tra log không chứa secret.
+### S3 — Arena
 
-## Giao diện nhận action từ DATNT
+- [ ] Chạy mọi chiến thuật × mọi map, in bảng điểm.
+- [ ] **Không cần API, không cần mạng** — chạy hoàn toàn offline.
+- [ ] Xuất bảng so sánh dạng markdown để dán vào PR.
 
-DATNT gửi action theo mẫu:
+---
 
-```text
-MATCH_ID: <id>
-DAY: <day>
-ACTION: <JSON array>
-VALIDATION: PASS
-TOTAL_STEPS: <per-agent>
-FUEL_REQUIRED: <per-agent>
-TARGETS: <spot/brand>
-PREDICTED_END_POS: <per-agent>
-FALLBACK: <action dự phòng>
-ASSUMPTIONS: <giả định>
-RISKS: <rủi ro>
+## Giai đoạn 2 — Bậc 2 và 4 của thang
+
+Không phải "chiến thuật riêng của KIENNT đấu với chiến thuật của DATNT". Cả hai
+xây **một bot chung**, mỗi người sở hữu vài bậc trên thang ở
+[`strategies.md`](../strategies.md). Các bậc xếp chồng lên nhau, không thay thế nhau.
+
+### Bậc 2 — Gán Hungarian (`strategy/hungarian.hpp`)
+
+Thay vì greedy chọn spot gần nhất cho từng xe, gán **xe ↔ spot tối ưu toàn cục**
+bằng thuật toán Hungary, `O(n³)`.
+
+- [ ] Ma trận chi phí: hàng là xe, cột là spot, ô là chi phí bước để tới nơi.
+- [ ] Giá trị mục tiêu trừ vào chi phí — cần luật chấm điểm từ Giai đoạn 0.
+- [ ] Xe không tới kịp spot nào thì gán chi phí vô cùng.
+
+Đây là bậc **ăn điểm nhiều nhất so với công bỏ ra**. Bot mẫu đang để hai xe tuần
+tra cùng chạy về `pos 16` — Hungarian xoá hẳn lớp lỗi đó.
+
+### Bậc 4 — Beam search (`strategy/beam_search.hpp`)
+
+Giữ `W` phương án tốt nhất ở mỗi độ sâu, mở rộng tiếp. Hợp với bài này vì ngân
+sách bước rời rạc.
+
+- [ ] Trạng thái: vị trí xe, bước đã dùng, nhiên liệu, spot đã thu.
+- [ ] Loại trạng thái trùng, nếu không beam sẽ đầy bản sao.
+- [ ] Chiều rộng và độ sâu chỉnh được, đo bằng arena để chọn.
+
+Chỉ làm sau khi bậc 1–3 xong và có số đo.
+
+---
+
+## Giao diện
+
+```cpp
+// strategy/hungarian.hpp, strategy/beam_search.hpp
+Plan planHungarian(const Setup&, const State&);
+Plan planBeamSearch(const Setup&, const State&);
 ```
 
-KIENNT không gửi nếu thiếu `VALIDATION: PASS`, sai match/day hoặc state đã cũ.
+Dùng `strategy/common.hpp` của DATNT để tìm đường và validate. **Không tự viết
+hàm tìm đường riêng** — hai bản pathing lệch nhau là lỗi rất khó tìm.
 
-## Giao diện gửi state cho DATNT
+Mỗi bậc một nhánh, một release: xem
+[quy ước](../strategies.md#mỗi-chiến-thuật-một-nhánh-một-release).
 
-```text
-MATCH_ID: <id>
-DAY: <day>
-STATE_SNAPSHOT: <reference>
-AGENTS: <position/fuel/kind>
-TRAFFIC: <summary>
-SPOTS_AND_STOCKS: <summary>
-SERVER_STATUS: LOCAL_READY|ERROR|UNKNOWN
-LAST_RESPONSE: <sanitized response>
-CONSTRAINTS: <step/fuel/rate-limit>
-ASSUMPTIONS: <giả định>
-```
-
-## Báo cáo sau mỗi ngày mô phỏng
-
-```text
-DAY: <day>
-SETUP_STATUS: <ok/error>
-STATE_STATUS: <ok/error>
-ACTION_STATUS: <accepted/rejected/unknown>
-RESPONSE_TIME_MS: <number>
-RETRY_COUNT: <number>
-SNAPSHOT: <path/reference>
-ERRORS: <...>
-NEXT_OPERATION: <...>
-```
-
-## Checklist trước khi gửi action local
-
-- [ ] Local/mock server đang chạy.
-- [ ] Fixture/state mới nhất đã được lưu.
-- [ ] Đúng match và day.
-- [ ] Đủ action cho mọi agent, đúng thứ tự.
-- [ ] DATNT đã trả `VALIDATION: PASS`.
-- [ ] Validator tích hợp pass.
-- [ ] Không có request trước ở trạng thái unknown.
-- [ ] Rate limit đủ an toàn.
-- [ ] Response/state sau action được lưu.
-- [ ] Log đã sanitize và không chứa token.
+---
 
 ## Giả định cần xác minh
 
-- [ ] Chu kỳ chính xác của `/start`, `/state` và `/actions` trong mock server.
-- [ ] State nào chứng minh action đã được áp dụng.
-- [ ] Chính sách retry/idempotency.
-- [ ] Schema đầy đủ của traffic và result.
-- [ ] Điều kiện chuyển sang ngày tiếp theo.
-- [ ] Cách tính thời gian phản hồi.
+- [ ] `brand` có tồn tại và có tính điểm không.
+- [ ] Thứ tự tie-break khi hai đội bằng điểm.
+- [ ] Stock nạp lại theo ngày với số lượng bao nhiêu.
+- [ ] Xe đi ngang spot có thu được không, hay phải dừng lại.
+- [ ] Một xe thu được tối đa mấy spot một ngày.

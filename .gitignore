@@ -24,6 +24,9 @@ node_modules/
 # C++ build artifacts
 hexudon-bot-cpp/bot
 hexudon-bot-cpp/bot.exe
+hexudon-bot-cpp/bot-linux-*
+hexudon-bot-cpp/bot-windows-*
+RELEASE_NOTES.md
 *.o
 *.obj
 *.d

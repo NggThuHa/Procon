@@ -20,7 +20,7 @@ phải từ response thật của ban tổ chức. Trước khi tin vào một f
 - Đối chiếu với `/setup` và `/state` thật khi có quyền truy cập.
 - Nếu server trả khác, sửa fixture theo server — server là nguồn sự thật.
 
-Các điểm chưa xác minh: tên/kiểu của `fuelLimits`, cách `brand` được mã hóa
+Các điểm chưa xác minh: hình dạng của `fuelLimits` (hiện là object `patrol`/`supply`), cách `brand` được mã hóa
 (số hay chuỗi), và schema đầy đủ của `traffics` và `others`.
 
 ## Quy tắc
