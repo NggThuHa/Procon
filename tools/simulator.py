@@ -61,7 +61,9 @@ class Simulator:
         self.fuel = [self.patrol_fuel] * self.n_agents
         self.traffic = {}
         self.day = 0
-        self.visited = []   # ô mà mỗi xe đã đi vào, theo ngày — để tầng trên chấm
+        self.visited = []        # ô mỗi xe đi vào, theo ngày
+        self.collected = {}      # brand -> tổng số phần
+        self.types_by_day = []   # số brand khác nhau tính đến cuối mỗi ngày
 
     def assign(self, kinds):
         if len(kinds) != self.n_agents:
@@ -183,11 +185,50 @@ class Simulator:
             if self.fuel[i] is not None:
                 self.fuel[i] -= plan["fuel_used"]
         self.visited.append([list(p["path"]) for p in plans])
+        self._collect()
+        self.types_by_day.append(len(self.collected))
         self.day += 1
         return plans
 
+    def _collect(self):
+        """Thu udon cuối ngày.
+
+        `[observed]` m-11542: một xe tuần tra đi vào spot `pos 0` (brand 0,
+        stocks 3) ngày 0 rồi ĐỨNG YÊN ngày 1-3. Kết quả udon_total = 4, tức
+        thu 1 phần MỖI NGÀY kể cả khi không di chuyển, và 4 > stocks ban đầu
+        nên tồn kho có nạp lại.
+
+        `[chưa xác minh]` Đi NGANG qua spot rồi dừng chỗ khác có thu không, và
+        một xe có thu được nhiều spot trong một ngày không. Ở đây dùng luật hẹp
+        nhất khớp với bằng chứng: thu tại ô xe DỪNG cuối ngày.
+        """
+        for i, kind in enumerate(self.kinds):
+            if kind != KIND_PATROL:
+                continue
+            spot = next((s for s in self.spots if s["pos"] == self.positions[i]), None)
+            if spot is None:
+                continue
+            brand = spot["brand"]
+            self.collected[brand] = self.collected.get(brand, 0) + 1
+
     def score(self):
-        raise NotImplementedError(
-            "Chưa có luật chấm điểm từ ban tổ chức. Xem Giai đoạn 0 trong "
-            "docs/PLAN.md — brand, stocks và thứ tự xếp hạng đều chưa có nguồn."
-        )
+        """Điểm theo đúng bốn chỉ số của `standings`, xếp theo thứ tự ưu tiên.
+
+        `[observed]` Kiểm chứng bằng m-11542: một xe đứng trên một spot suốt 4
+        ngày cho udon_types=1, daily_types_sum=4, udon_total=4. Và bot AI mở đủ
+        4 brand từ sớm cho daily_types_sum=16 = 4 brand x 4 ngày.
+        """
+        return {
+            "udon_types": len(self.collected),
+            "daily_types_sum": sum(self.types_by_day),
+            "udon_total": sum(self.collected.values()),
+            "by_brand": dict(sorted(self.collected.items())),
+        }
+
+    @staticmethod
+    def better(a, b):
+        """True nếu `a` thắng `b`. response_ms_total do server đo, không mô phỏng."""
+        for key in ("udon_types", "daily_types_sum", "udon_total"):
+            if a[key] != b[key]:
+                return a[key] > b[key]
+        return False

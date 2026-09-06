@@ -197,3 +197,46 @@ lưu lượng request. Beam search rộng hoàn toàn nằm trong khả năng.
 
 12 so với 61, gấp 5 lần. Bot mẫu chỉ thu ở spot đầu tiên gặp mỗi ngày và để hai
 xe cùng nhắm một spot. Bậc 2 (gán Hungarian) nhắm thẳng vào chỗ này.
+
+---
+
+## Luật cộng điểm, đọc ngược từ trận có kiểm soát
+
+`m-11542` — cho **đúng một** xe tuần tra đi vào spot `pos 0` (`brand 0`,
+`stocks 3`) ở ngày 0 rồi **đứng yên** ba ngày còn lại. Ba xe kia đứng im cả trận.
+Dữ liệu: [`docs/observed/probe-result.json`](observed/probe-result.json).
+
+| | Kết quả |
+|---|---|
+| `udon_types` | 1 |
+| `daily_types_sum` | 4 |
+| `udon_total` | **4** |
+
+Suy ra:
+
+1. **Thu 1 phần mỗi ngày, kể cả khi đứng yên.** Không cần đi lại; ở trên spot là
+   đủ. Bốn ngày cho bốn phần.
+2. **Tồn kho có nạp lại.** Spot chỉ có `stocks: 3` nhưng thu được `4`, nên `stocks`
+   không phải trần cộng dồn cả trận.
+3. **`daily_types_sum` = tổng theo ngày của số brand đang có.** Giữ 1 loại suốt 4
+   ngày cho `1+1+1+1 = 4`. Khớp với bot AI: mở đủ 4 brand từ sớm cho
+   `4×4 = 16`.
+
+### Hệ quả chiến thuật
+
+Điểm 1 và 2 cộng lại rất đáng chú ý: **đỗ một xe trên spot là nguồn thu ổn định**.
+Không phải lúc nào cũng đáng chạy vòng quanh — với trận ngắn, đưa mỗi xe tới một
+brand *khác nhau* rồi đỗ lại có thể ăn hơn là đi gom nhiều spot cùng brand.
+
+Điểm 3 nói cách thắng: **mở đủ brand càng sớm càng tốt**, vì mỗi ngày sau đó đều
+được cộng lại. Mở đủ 4 brand ngày 0 hơn hẳn mở đủ vào ngày cuối.
+
+### Còn chưa xác minh
+
+- Đi **ngang** qua spot rồi dừng chỗ khác có thu không? Simulator hiện dùng luật
+  hẹp nhất khớp bằng chứng: chỉ thu tại ô xe **dừng** cuối ngày.
+- Một xe thu được nhiều spot trong một ngày không?
+- Tồn kho nạp lại bao nhiêu mỗi ngày?
+- Hai xe cùng đỗ trên một spot thì sao?
+
+Mỗi câu trên chạy thêm một trận probe là trả lời được.

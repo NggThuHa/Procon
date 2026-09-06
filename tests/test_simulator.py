@@ -106,12 +106,51 @@ class TestRejects(unittest.TestCase):
         self.assertRejects(E_NO_FUEL, [[2], [-1], [-1], [-1]], setup=s)
 
 
-class TestScoreIsBlocked(unittest.TestCase):
-    def test_score_refuses_until_scoring_verified(self):
-        # Thứ tự xếp hạng đã xác minh qua standings, nhưng cách CỘNG điểm
-        # (thu udon khi nào, bao nhiêu) thì chưa.
-        with self.assertRaises(NotImplementedError):
-            sim().score()
+class TestScoring(unittest.TestCase):
+    """Tái hiện đúng thí nghiệm m-11542 (docs/observed/probe-result.json)."""
+
+    def _park_one_agent_on_a_spot(self):
+        s = sim(kinds=(0, 0, 0, 0))
+        spot = s.spots[0]
+        s.positions[0] = spot["pos"]
+        return s, spot
+
+    def test_standing_on_spot_collects_every_day(self):
+        # m-11542: xe vào spot ngày 0 rồi đứng yên -> udon_total = 4 = số ngày.
+        s, spot = self._park_one_agent_on_a_spot()
+        for _ in range(s.n_days):
+            s.step([[-32]] * 4)
+        score = s.score()
+        self.assertEqual(score["udon_types"], 1)
+        self.assertEqual(score["udon_total"], s.n_days)
+        self.assertEqual(score["by_brand"], {spot["brand"]: s.n_days})
+
+    def test_daily_types_sum_rewards_opening_early(self):
+        # Giữ 1 loại suốt 4 ngày -> 1+1+1+1 = 4, đúng như m-11542.
+        s, _ = self._park_one_agent_on_a_spot()
+        for _ in range(s.n_days):
+            s.step([[-32]] * 4)
+        self.assertEqual(s.score()["daily_types_sum"], s.n_days)
+
+    def test_no_collection_when_parked_off_spot(self):
+        s = sim(kinds=(0, 0, 0, 0))
+        for _ in range(s.n_days):
+            s.step([[-32]] * 4)
+        self.assertEqual(s.score()["udon_total"], 0)
+
+    def test_supply_vehicle_does_not_collect(self):
+        s = sim(kinds=(1, 0, 0, 0))
+        s.positions[0] = s.spots[0]["pos"]
+        s.step([[-32]] * 4)
+        self.assertEqual(s.score()["udon_total"], 0)
+
+    def test_better_follows_priority_order(self):
+        low = {"udon_types": 1, "daily_types_sum": 99, "udon_total": 99}
+        high = {"udon_types": 2, "daily_types_sum": 1, "udon_total": 1}
+        self.assertTrue(Simulator.better(high, low), "udon_types phải thắng trước")
+        a = {"udon_types": 2, "daily_types_sum": 9, "udon_total": 99}
+        b = {"udon_types": 2, "daily_types_sum": 16, "udon_total": 1}
+        self.assertTrue(Simulator.better(b, a), "hoà types thì daily_types_sum quyết")
 
 
 if __name__ == "__main__":

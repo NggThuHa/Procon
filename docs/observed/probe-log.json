@@ -1,0 +1,243 @@
+[
+  {
+    "day": 0,
+    "agent0_from": 1,
+    "action": [
+      5,
+      -30
+    ],
+    "steps_used": 2,
+    "response": {
+      "protocol_version": "v0.1-draft",
+      "type": "action_result",
+      "match_id": "m-11542",
+      "day": 1,
+      "valid": true,
+      "reason": "",
+      "submission_id": "team-A-d1-2",
+      "response_ms": 95
+    },
+    "spots_before": [
+      {
+        "brand": 0,
+        "pos": 0,
+        "stocks": 3
+      },
+      {
+        "brand": 1,
+        "pos": 56,
+        "stocks": 4
+      },
+      {
+        "brand": 2,
+        "pos": 34,
+        "stocks": 4
+      },
+      {
+        "brand": 3,
+        "pos": 44,
+        "stocks": 4
+      },
+      {
+        "brand": 0,
+        "pos": 32,
+        "stocks": 1
+      },
+      {
+        "brand": 1,
+        "pos": 23,
+        "stocks": 4
+      },
+      {
+        "brand": 2,
+        "pos": 62,
+        "stocks": 4
+      },
+      {
+        "brand": 3,
+        "pos": 14,
+        "stocks": 4
+      }
+    ]
+  },
+  {
+    "day": 1,
+    "agent0_from": 0,
+    "action": [
+      -32
+    ],
+    "steps_used": 0,
+    "response": {
+      "protocol_version": "v0.1-draft",
+      "type": "action_result",
+      "match_id": "m-11542",
+      "day": 2,
+      "valid": true,
+      "reason": "",
+      "submission_id": "team-A-d2-3",
+      "response_ms": 465
+    },
+    "spots_before": [
+      {
+        "brand": 0,
+        "pos": 0,
+        "stocks": 3
+      },
+      {
+        "brand": 1,
+        "pos": 56,
+        "stocks": 4
+      },
+      {
+        "brand": 2,
+        "pos": 34,
+        "stocks": 4
+      },
+      {
+        "brand": 3,
+        "pos": 44,
+        "stocks": 4
+      },
+      {
+        "brand": 0,
+        "pos": 32,
+        "stocks": 1
+      },
+      {
+        "brand": 1,
+        "pos": 23,
+        "stocks": 4
+      },
+      {
+        "brand": 2,
+        "pos": 62,
+        "stocks": 4
+      },
+      {
+        "brand": 3,
+        "pos": 14,
+        "stocks": 4
+      }
+    ]
+  },
+  {
+    "day": 2,
+    "agent0_from": 0,
+    "action": [
+      -32
+    ],
+    "steps_used": 0,
+    "response": {
+      "protocol_version": "v0.1-draft",
+      "type": "action_result",
+      "match_id": "m-11542",
+      "day": 3,
+      "valid": true,
+      "reason": "",
+      "submission_id": "team-A-d3-4",
+      "response_ms": 194
+    },
+    "spots_before": [
+      {
+        "brand": 0,
+        "pos": 0,
+        "stocks": 3
+      },
+      {
+        "brand": 1,
+        "pos": 56,
+        "stocks": 4
+      },
+      {
+        "brand": 2,
+        "pos": 34,
+        "stocks": 4
+      },
+      {
+        "brand": 3,
+        "pos": 44,
+        "stocks": 4
+      },
+      {
+        "brand": 0,
+        "pos": 32,
+        "stocks": 1
+      },
+      {
+        "brand": 1,
+        "pos": 23,
+        "stocks": 4
+      },
+      {
+        "brand": 2,
+        "pos": 62,
+        "stocks": 4
+      },
+      {
+        "brand": 3,
+        "pos": 14,
+        "stocks": 4
+      }
+    ]
+  },
+  {
+    "day": 3,
+    "agent0_from": 0,
+    "action": [
+      -32
+    ],
+    "steps_used": 0,
+    "response": {
+      "protocol_version": "v0.1-draft",
+      "type": "action_result",
+      "match_id": "m-11542",
+      "day": 4,
+      "valid": true,
+      "reason": "",
+      "submission_id": "team-A-d4-5",
+      "response_ms": 232
+    },
+    "spots_before": [
+      {
+        "brand": 0,
+        "pos": 0,
+        "stocks": 3
+      },
+      {
+        "brand": 1,
+        "pos": 56,
+        "stocks": 4
+      },
+      {
+        "brand": 2,
+        "pos": 34,
+        "stocks": 4
+      },
+      {
+        "brand": 3,
+        "pos": 44,
+        "stocks": 4
+      },
+      {
+        "brand": 0,
+        "pos": 32,
+        "stocks": 1
+      },
+      {
+        "brand": 1,
+        "pos": 23,
+        "stocks": 4
+      },
+      {
+        "brand": 2,
+        "pos": 62,
+        "stocks": 4
+      },
+      {
+        "brand": 3,
+        "pos": 14,
+        "stocks": 4
+      }
+    ]
+  }
+]
