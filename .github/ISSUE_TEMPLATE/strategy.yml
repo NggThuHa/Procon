@@ -1,0 +1,99 @@
+name: Chiến thuật mới
+description: Mô tả một bậc chiến thuật trước khi code, để cả team nắm được.
+title: "[STRAT] "
+labels:
+  - strategy
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Mở issue này **trước khi bắt đầu code**. Mỗi chiến thuật một issue, một
+        nhánh `strategy/<tên>`, một release `bot-<tên>-v<N>`.
+
+        Xem thang bậc ở `docs/strategies.md`.
+
+  - type: input
+    id: slug
+    attributes:
+      label: Tên chiến thuật (slug)
+      description: Dùng cho nhánh, tag và tên file. Chữ thường, nối bằng gạch ngang.
+      placeholder: hungarian
+    validations:
+      required: true
+
+  - type: dropdown
+    id: rung
+    attributes:
+      label: Bậc trên thang
+      options:
+        - "1 — Dijkstra (đường đi rẻ nhất)"
+        - "2 — Gán Hungarian (xe ↔ spot toàn cục)"
+        - "3 — Rolling horizon (kế hoạch nhiều ngày)"
+        - "4 — Beam search"
+        - "5 — SA / ALNS"
+        - "Khác — mô tả ở dưới"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Người phụ trách
+      options:
+        - KIENNT
+        - DATNT
+        - Cả hai
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Ý tưởng cốt lõi
+      description: Giải thích để người kia đọc là hiểu, không cần đọc code.
+      placeholder: |
+        Thay vì mỗi xe tự chọn spot gần nhất, dựng ma trận chi phí xe × spot
+        rồi giải bài toán gán bằng thuật toán Hungary...
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Vì sao kỳ vọng hơn bản hiện tại
+      description: Nêu lỗi hoặc điểm yếu cụ thể mà nó khắc phục.
+      placeholder: |
+        Bản hiện tại để hai xe tuần tra cùng nhắm một spot, phí một lượt thu.
+    validations:
+      required: true
+
+  - type: textarea
+    id: regime
+    attributes:
+      label: Mạnh ở dạng đề nào, yếu ở đâu
+      placeholder: |
+        Mạnh: nhiều xe, nhiều spot, khoảng cách chênh nhau rõ.
+        Yếu: một xe, hoặc spot dày đặc thì gần như không khác greedy.
+    validations:
+      required: true
+
+  - type: textarea
+    id: measure
+    attributes:
+      label: Đo bằng gì
+      description: Map nào trong bộ thử nghiệm, chỉ số nào, ngưỡng nào coi là thắng.
+      placeholder: |
+        Chạy arena trên cả 5 map. Coi là thắng nếu điểm trung bình tăng và
+        không map nào tụt quá 5%.
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Rủi ro và giả định
+      description: |
+        Ghi rõ giả định luật nào nó dựa vào. Đối chiếu `docs/observed/` trước
+        khi coi một luật là chắc chắn.
+    validations:
+      required: true

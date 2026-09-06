@@ -1,19 +1,49 @@
-## Mô tả
+## Chiến thuật này làm gì
 
-<!-- PR này thay đổi điều gì và vì sao? -->
+<!--
+BẮT BUỘC. Viết để người kia đọc là hiểu, không cần mở code.
+Nếu PR không đổi chiến thuật (sửa tài liệu, CI, hạ tầng), ghi "Không đổi chiến thuật".
+-->
+
+**Issue:** #
+
+**Ý tưởng:**
+
+**Khác gì bản trước:**
+
+## Số đo arena
+
+<!-- Không có số thì không merge. Dán bảng từ docs/arena/<tên>.md. -->
+
+| Map | Trước | Sau | Chênh |
+|---|---:|---:|---:|
+| dense-road | | | |
+| tight-fuel | | | |
+| long-match | | | |
+| **Trung bình** | | | |
+
+**Kết luận:** <!-- thắng ở đâu, thua ở đâu, có nên làm mặc định không -->
 
 ## Người phụ trách
 
-- [ ] KIENNT — local/mock server, API, snapshot, log, retry
-- [ ] DATNT — map, route, validator, simulator
-- [ ] Phối hợp hai phần
+- [ ] KIENNT — chọn mục tiêu, chấm điểm, simulator/arena
+- [ ] DATNT — bản đồ, đường đi, điều phối xe
+- [ ] Cả hai
 
 ## Phạm vi
 
-- [ ] Local-only/mock server
-- [ ] Không yêu cầu deploy public
+- [ ] Chỉ chạm `strategy/<tên>.hpp` của mình
+- [ ] Có sửa `strategy/common.hpp` — **cần review của người kia**
 - [ ] Có thay đổi tài liệu
-- [ ] Có thay đổi fixture/snapshot (đã kiểm tra không chứa secret)
+- [ ] Có thay đổi fixture (đã kiểm tra không chứa secret)
+
+## Giả định luật
+
+<!--
+Chiến thuật này dựa vào luật nào? Mỗi luật ghi nguồn:
+[observed] docs/observed/... · [main.cpp] · [BTC spec] · [CHƯA XÁC MINH]
+Nếu có mục CHƯA XÁC MINH, nói rõ nó sai thì hỏng đến đâu.
+-->
 
 ## Kiểm tra đã chạy
 
@@ -23,14 +53,9 @@
 
 ## Checklist
 
-- [ ] Đã đọc `AGENTS.md` và tài liệu phân công liên quan.
-- [ ] Không sửa ngoài phạm vi yêu cầu.
-- [ ] Validator đã kiểm tra adjacency, ao, step, fuel, traffic và format (nếu có action).
-- [ ] Test lỗi `E_NOT_ADJACENT`, `E_POND`, `E_STEP_OVERFLOW`, `E_NO_FUEL`, `E_BAD_FORMAT`/rate limit (nếu liên quan).
+- [ ] Đã đọc `AGENTS.md` và `docs/strategies.md`.
+- [ ] Validator không báo lỗi trên toàn bộ map thử nghiệm.
+- [ ] Không sửa ngoài phạm vi.
 - [ ] Đã chạy `git diff --check`.
-- [ ] Không có `.env`, token, credentials hoặc Authorization header trong diff.
-- [ ] Đã cập nhật `README.md`, `PLAN.md` hoặc file plan riêng nếu cần.
-
-## Giả định / câu hỏi còn mở
-
-<!-- Ghi ASSUMPTION rõ ràng; không tự khẳng định luật chưa xác minh. -->
+- [ ] Không có `.env`, token hay Authorization header trong diff.
+- [ ] Đã cập nhật file plan của người phụ trách nếu có milestone mới.
