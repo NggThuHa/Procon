@@ -7,7 +7,7 @@ Mục tiêu của team là điều khiển các xe trên bản đồ lục giác
 ## Đọc tài liệu theo thứ tự
 
 1. Đọc phần **Luật chơi** trong file này.
-2. Đọc kế hoạch chung [`PLAN.md`](PLAN.md).
+2. Đọc kế hoạch chung [`PLAN.md`](docs/PLAN.md).
 3. KIENNT (tôi) đọc [`docs/plan/KIENNT.md`](docs/plan/KIENNT.md); DATNT đọc [`docs/plan/DATNT.md`](docs/plan/DATNT.md).
 4. Khi làm việc với AI Agent, đọc [`AGENTS.md`](AGENTS.md).
 5. Luôn kiểm tra dữ liệu thực tế từ `/setup` và `/state`; không coi ví dụ trong tài liệu là dữ liệu của trận hiện tại.
