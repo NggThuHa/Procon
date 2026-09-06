@@ -27,7 +27,7 @@ import urllib.request
 
 from .rules import TERRAIN_POND, TRAFFIC_CLEAR, move_cost, neighbor
 
-BASE = os.environ.get("PROCON_URL", "https://procon.ptit.edu.vn")
+BASE = os.environ.get("PROCON_URL", "http://localhost:8000")
 
 
 def _call(method, path, payload=None, token=None):

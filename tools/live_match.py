@@ -19,7 +19,7 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("PROCON_URL", "https://procon.ptit.edu.vn")
+BASE = os.environ.get("PROCON_URL", "http://localhost:8000")
 
 
 def _post(path, payload, token=None):
