@@ -282,7 +282,7 @@ AI Agent không được tự bịa schema, luật điểm, chi phí, điều ki
 | File | Mục đích |
 |---|---|
 | `README.md` | Giới thiệu và luật chơi |
-| `PLAN.md` | Quy ước chung và cách phối hợp |
+| `docs/PLAN.md` | Quy ước chung và cách phối hợp |
 | `docs/plan/KIENNT.md` | Kế hoạch chi tiết của KIENNT (tôi) |
 | `docs/plan/DATNT.md` | Kế hoạch chi tiết của DATNT |
 | `AGENTS.md` | Quy tắc để AI Agent làm việc trong repo |

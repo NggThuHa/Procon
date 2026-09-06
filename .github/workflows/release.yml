@@ -1,0 +1,117 @@
+name: Release bot
+
+# Mỗi chiến thuật một nhánh, mỗi lần chốt một release.
+# Tag theo mẫu:  bot-<chien-thuat>-v<N>     ví dụ: bot-hungarian-v1
+#
+#   git switch -c strategy/hungarian
+#   ... code ...
+#   git tag bot-hungarian-v1 && git push origin bot-hungarian-v1
+#
+# Workflow build nhị phân Linux + Windows rồi tạo GitHub Release đính kèm.
+
+on:
+  push:
+    tags:
+      - 'bot-*-v*'
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: 'Tên chiến thuật (dùng khi chạy tay)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build và phát hành
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tách tên chiến thuật và phiên bản từ tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ ^bot-(.+)-v([0-9]+)$ ]]; then
+            echo "strategy=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "version=v${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "strategy=${{ github.event.inputs.strategy }}" >> "$GITHUB_OUTPUT"
+            echo "version=manual" >> "$GITHUB_OUTPUT"
+          fi
+          echo "branch=$(git branch -r --contains "$GITHUB_SHA" --format='%(refname:lstrip=3)' | grep -v HEAD | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cài trình biên dịch chéo Windows
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mingw-w64
+
+      - name: Build Linux
+        working-directory: hexudon-bot-cpp
+        run: |
+          set -euo pipefail
+          make clean
+          make CXXFLAGS='-std=c++17 -O2 -Wall -Wextra -Werror'
+          mv bot "bot-linux-x86_64"
+
+      - name: Build Windows
+        working-directory: hexudon-bot-cpp
+        run: |
+          set -euo pipefail
+          x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -static -o bot-windows-x86_64.exe main.cpp -lws2_32
+
+      - name: Kiểm tra nhanh nhị phân Linux
+        working-directory: hexudon-bot-cpp
+        run: |
+          set -euo pipefail
+          rc=0
+          ./bot-linux-x86_64 >/dev/null 2>err.txt || rc=$?
+          test "$rc" -eq 2 || { echo "smoke test that bai: exit=$rc"; cat err.txt; exit 1; }
+
+      - name: Soạn ghi chú phát hành
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Chiến thuật \`${{ steps.meta.outputs.strategy }}\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Nhánh | \`${{ steps.meta.outputs.branch }}\` |"
+            echo "| Commit | \`${GITHUB_SHA:0:8}\` |"
+            echo "| Build | \`-std=c++17 -O2 -Wall -Wextra -Werror\` |"
+            echo
+            if [ -f "docs/arena/${{ steps.meta.outputs.strategy }}.md" ]; then
+              echo "### Điểm arena"
+              echo
+              cat "docs/arena/${{ steps.meta.outputs.strategy }}.md"
+            else
+              echo "> ⚠️ Chưa có \`docs/arena/${{ steps.meta.outputs.strategy }}.md\`."
+              echo "> Release không có điểm arena thì không so sánh được với chiến thuật khác."
+            fi
+            echo
+            echo "### Chạy"
+            echo '```bash'
+            echo './bot-linux-x86_64 "$BASE_URL" "$MATCH_ID" "$API_TOKEN"'
+            echo '```'
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Tạo release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${{ steps.meta.outputs.strategy }} ${{ steps.meta.outputs.version }}" \
+            --notes-file RELEASE_NOTES.md \
+            hexudon-bot-cpp/bot-linux-x86_64 \
+            hexudon-bot-cpp/bot-windows-x86_64.exe

@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in README.md PLAN.md AGENTS.md docs/plan/KIENNT.md docs/plan/DATNT.md .env.example; do
+          for f in README.md docs/PLAN.md AGENTS.md docs/plan/KIENNT.md docs/plan/DATNT.md .env.example; do
             test -f "$f" || { echo "Missing required file: $f"; exit 1; }
           done
 
@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -nE 'Bearer[[:space:]]+[A-Za-z0-9._-]{12,}|(API_TOKEN|SECRET|PASSWORD)[[:space:]]*=[[:space:]]*[^<[:space:]]+' -- ':!*.example' ':!.env.example' ':!AGENTS.md' ':!README.md' ':!PLAN.md' ':!docs/**'; then
+          if git grep -nE 'Bearer[[:space:]]+[A-Za-z0-9._-]{12,}|(API_TOKEN|SECRET|PASSWORD)[[:space:]]*=[[:space:]]*[^<[:space:]]+' -- ':!*.example' ':!.env.example' ':!AGENTS.md' ':!README.md' ':!docs/PLAN.md' ':!docs/**'; then
             echo 'Potential secret found in tracked files.'
             exit 1
           fi
@@ -75,3 +75,18 @@ jobs:
           ./bot >/dev/null 2>stderr.txt || rc=$?
           test "$rc" -eq 2 || { echo "expected exit 2, got $rc"; cat stderr.txt; exit 1; }
           grep -q '<URL>' stderr.txt
+
+  simulator:
+    name: Test simulator và luật bản đồ
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Chạy test (chỉ stdlib, không cần cài gì)
+        run: python3 -m unittest discover -s tests -t . -v

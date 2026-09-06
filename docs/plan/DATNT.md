@@ -1,138 +1,116 @@
-# DATNT — Kế hoạch phụ trách map, chiến thuật, route và validator
+# DATNT — Bản đồ, đường đi và điều phối xe
 
 ## Vai trò
 
-DATNT phụ trách **hiểu luật, mô hình map, chọn mục tiêu, tính route, validator và simulator**. KIENNT (tôi) phụ trách localhost/API và vận hành.
+Trả lời câu hỏi **"đi thế nào cho kịp"**: từ danh sách mục tiêu, sinh ra chuỗi
+lệnh hợp lệ, rẻ nhất, không vượt bước và nhiên liệu. KIENNT trả lời "đi đâu thì
+đáng".
 
-- Nhánh làm việc: `dat/route-planner`
-- File cập nhật kết quả: `docs/plan/DATNT.md`
-- Luật bắt buộc: [`README.md`](../../README.md)
-- Quy ước phối hợp: [`PLAN.md`](../../PLAN.md)
-- Môi trường kiểm thử: state/fixture từ localhost/mock server
+Sở hữu `strategy/common.hpp` — nền chung mà cả hai chiến thuật đều dùng. Sửa file
+này phải có review của KIENNT.
 
-## Nguyên tắc chiến thuật
+- Nhánh: `dat/strategy-multiday`
+- Chiến thuật sở hữu: `strategy/multi_day.hpp`
+- Luật: [`README.md`](../../README.md) · Phối hợp: [`PLAN.md`](../PLAN.md)
 
-1. Ưu tiên mở `brand` chưa có trước khi tối ưu thêm số phần của brand đã có.
-2. Mọi route phải dựa trên state, traffic, vị trí, fuel và stock mới nhất.
-3. Không tự đoán neighbor, cost, điều kiện tiếp tế hoặc cách thu spot.
-4. Luôn tạo fallback đứng yên hoặc route an toàn.
-5. Chạy validator trước khi bàn giao action cho KIENNT.
-6. Chỉ dùng fixture/state đã được KIENNT đánh dấu `LOCAL_READY` hoặc snapshot hợp lệ.
+---
 
-## Công việc cụ thể
+## Giai đoạn 0 — Phần việc của DATNT
 
-### D1 — Phân tích luật và setup
+- [ ] Hỏi BTC: **điều kiện chính xác để xe tiếp tế nạp nhiên liệu** — cùng ô? cùng
+      lúc? có tốn lượt không? Đây là thứ chặn toàn bộ chiến thuật `multi_day`.
+- [ ] Hỏi BTC: công thức traffic giữa các ngày, và mã lỗi thật khi action sai.
+- [ ] Xác nhận parity lục giác bằng dữ liệu thật: gửi một nước đi, đối chiếu `pos`
+      trong `/state` kế tiếp với dự đoán.
 
-- [ ] Đọc `README.md` và ghi rõ phần nào là luật bắt buộc, phần nào là giả định.
-- [ ] Đọc `map.width`, `map.height`, `map.cells`, agents, spots, daySteps và fuelLimits từ fixture/state.
-- [ ] Xác định brand đã có, brand còn thiếu và stock.
-- [ ] Ghi các điểm chưa xác minh vào mục cuối file.
+---
 
-### D2 — Mô hình bản đồ lục giác
+## Giai đoạn 1 — Nền chung (`strategy/common.hpp`)
 
-- [ ] Xác nhận `pos = row * width + column`.
-- [ ] Xây dựng bảng neighbor cho 6 hướng `0..5` theo parity.
-- [ ] Test ô giữa, ô biên, ô ngoài map và ao.
-- [ ] Không coi `pos + 1`/`pos - 1` mặc định là neighbor.
-- [ ] Bàn giao bảng neighbor và case test cho KIENNT.
+### C1 — Mô hình bản đồ
 
-### D3 — Chọn mục tiêu và xếp hạng route
+- [ ] Neighbor 6 hướng theo parity EVEN-R.
+      Đã có bản tham chiếu đã test ở [`tools/rules.py`](../../tools/rules.py) —
+      đối chiếu với nó, và test cả 6 hướng × mọi ô, kiểm tra tính đối xứng
+      (đi hướng `d` rồi đi hướng ngược lại phải về chỗ cũ).
+- [ ] Chi phí bước và nhiên liệu tính theo **ô nguồn**, không phải ô đích.
+- [ ] Ao và ô ngoài map bị loại khỏi đồ thị.
 
-Xếp route theo thứ tự:
+### C2 — Tìm đường (ưu tiên cao nhất trong Giai đoạn 1)
 
-1. Mở được nhiều brand mới hơn.
-2. Đóng góp tốt hơn vào brand tích lũy theo ngày.
-3. Thu nhiều phần hơn nếu hai lựa chọn trên tương đương.
-4. Có biên an toàn bước/fuel lớn hơn.
-5. Ít phụ thuộc vào timing hỗ trợ hơn.
+- [ ] **Thay `bfs()` bằng Dijkstra.** Hàm hiện tại tìm đường ít ô nhất, không phải
+      rẻ nhất. Với đất=2, đường=1, núi=3, đường đi nó chọn đang sai — đây là bug
+      thật, không phải cải tiến.
+- [ ] Trọng số lấy từ traffic của state hiện tại, không dùng lại của ngày trước.
+- [ ] Trả về cả chi phí bước và chi phí nhiên liệu, để tầng chọn mục tiêu cân nhắc.
 
-Với mỗi route phải tính vị trí sau từng lệnh, chi phí bước theo ô nguồn, fuel, spot đầu tiên ghé và vị trí kết thúc.
+### C3 — Validator
 
-### D4 — Validator/simulator
+Chạy trước mọi lần gửi. Một action sai có thể làm hỏng cả submission.
 
-Validator bắt buộc kiểm tra:
+- [ ] Đúng số agent, đúng thứ tự.
+- [ ] Lệnh đi thuộc `0..5`, lệnh chờ là số âm.
+- [ ] Mỗi bước tới ô thực sự kề, không vào ao, không ra ngoài map.
+- [ ] Tổng bước không vượt `daySteps[day]`.
+- [ ] Xe tuần tra đủ nhiên liệu suốt lộ trình.
+- [ ] Vị trí kết thúc khớp với dự đoán.
 
-- [ ] JSON hợp lệ.
-- [ ] Số action ngoài đúng số agent và đúng thứ tự.
-- [ ] Lệnh đi thuộc `0..5`; lệnh chờ có format `-N`.
-- [ ] Mỗi bước tới ô kề hợp lệ.
-- [ ] Không vào ao/ra ngoài map.
-- [ ] Không vượt `daySteps[day]`.
-- [ ] Xe tuần tra đủ fuel.
-- [ ] Điều kiện xe tiếp tế không bị vi phạm.
-- [ ] Route kết thúc tại vị trí dự kiến.
+Validator này phải **độc lập với simulator của KIENNT**. Hai bên cùng bug thì mất
+tác dụng kiểm tra chéo — đó là điểm mạnh duy nhất của việc có hai bản.
 
-Lỗi tối thiểu: `E_BAD_FORMAT`, `E_NOT_ADJACENT`, `E_POND`, `E_STEP_OVERFLOW`, `E_NO_FUEL`.
+---
 
-### D5 — Bộ test route
+## Giai đoạn 2 — Bậc 1, 3 và 5 của thang
 
-- [ ] Cả 6 hướng ở ô giữa và ô biên.
-- [ ] Ao chắn đường.
-- [ ] Route vừa đủ/vượt bước một đơn vị.
-- [ ] Route vừa đủ/vượt fuel một đơn vị.
-- [ ] Lệnh đứng yên chiếm ngân sách theo luật fixture.
-- [ ] Nhiều agent cùng đến một spot.
-- [ ] Xe tiếp tế đứng yên/chờ.
-- [ ] Traffic ngày sau làm route cũ không còn hợp lệ.
-- [ ] Fallback đứng yên serialize được.
-- [ ] Chạy validator với fixture lỗi do KIENNT cung cấp.
+Cả hai người xây **một bot chung**, mỗi người sở hữu vài bậc trên thang ở
+[`strategies.md`](../strategies.md). Các bậc xếp chồng, không thay thế nhau.
 
-## Giao diện bàn giao cho KIENNT
+### Bậc 1 — Dijkstra (đã nằm trong C2)
 
-DATNT gửi action theo mẫu:
+Bậc đầu tiên và là bậc bắt buộc: đây là **sửa bug**, không phải cải tiến.
 
-```text
-MATCH_ID: <id>
-DAY: <day>
-ACTION: <JSON array>
-VALIDATION: PASS
-TOTAL_STEPS: <per-agent>
-FUEL_REQUIRED: <per-agent>
-TARGETS: <spot/brand>
-PREDICTED_END_POS: <per-agent>
-FALLBACK: <action dự phòng>
-ASSUMPTIONS: <giả định>
-RISKS: <rủi ro>
+### Bậc 3 — Rolling horizon (`strategy/rolling_horizon.hpp`)
+
+Lập kế hoạch `N` ngày, chỉ thực thi ngày đầu, hôm sau lập lại từ state mới.
+
+- [ ] Đây là cách đúng để đối phó traffic thay đổi — kế hoạch cứng cả trận sẽ sai
+      ngay từ ngày thứ hai.
+- [ ] Lồng lịch tiếp nhiên liệu vào: xe tiếp tế đón xe tuần tra ở đâu, ngày nào.
+- [ ] Tính traffic do **chính mình** tạo ra — dồn nhiều xe qua một ô đường sẽ làm
+      chính mình chậm ngày hôm sau.
+- [ ] `N` chỉnh được, đo bằng arena.
+
+### Bậc 5 — ALNS (`strategy/alns.hpp`)
+
+Adaptive Large Neighborhood Search: phá một phần lời giải rồi dựng lại, tự học
+toán tử nào hiệu quả. Đây là thứ mạnh nhất trong tài liệu Team Orienteering
+Problem hiện nay.
+
+- [ ] Toán tử phá: bỏ ngẫu nhiên, bỏ theo cụm địa lý, bỏ spot đắt nhất.
+- [ ] Toán tử dựng: chèn tham lam, chèn hối tiếc.
+- [ ] Chấp nhận lời giải xấu hơn theo kiểu Simulated Annealing.
+
+Chỉ làm khi bậc 1–4 đã xong và còn thời gian. Đắt nhất trên thang.
+
+---
+
+## Giao diện
+
+```cpp
+// strategy/rolling_horizon.hpp, strategy/alns.hpp
+Plan planRollingHorizon(const Setup&, const State&);
+Plan planAlns(const Setup&, const State&);
 ```
 
-Nếu validator fail, phải sửa route và gửi lại payload. Không ghi token hoặc dữ liệu bí mật vào file bàn giao.
+Mỗi bậc một nhánh, một release: xem
+[quy ước](../strategies.md#mỗi-chiến-thuật-một-nhánh-một-release).
 
-## Giao diện nhận state từ KIENNT
-
-```text
-MATCH_ID: <id>
-DAY: <day>
-STATE_SNAPSHOT: <reference>
-AGENTS: <position/fuel/kind>
-TRAFFIC: <summary>
-SPOTS_AND_STOCKS: <summary>
-SERVER_STATUS: LOCAL_READY|ERROR|UNKNOWN
-LAST_RESPONSE: <sanitized response>
-CONSTRAINTS: <step/fuel/rate-limit>
-ASSUMPTIONS: <giả định>
-```
-
-Không tính route từ state có `ERROR`, `UNKNOWN` hoặc day không khớp.
-
-## Báo cáo sau mỗi ngày mô phỏng
-
-```text
-DAY: <day>
-BRANDS_BEFORE: <...>
-BRANDS_TARGETED: <...>
-BRANDS_COLLECTED: <...>
-ACTION_STATUS: <accepted/rejected/unknown>
-ROUTE_RESULT: <summary>
-ASSUMPTIONS_CONFIRMED: <...>
-ISSUES: <...>
-NEXT_CHANGE: <...>
-```
+---
 
 ## Giả định cần xác minh
 
-- [ ] Công thức neighbor chính xác theo parity của fixture.
-- [ ] Cách mock server tính lệnh `-N` vào `daySteps`.
-- [ ] Điều kiện chính xác để xe tiếp tế nạp fuel.
-- [ ] Điều kiện “ghé spot” và cách xử lý nhiều xe cùng spot.
+- [ ] Lệnh chờ `-N` có tiêu tốn đúng `N` bước trong ngân sách không.
+- [ ] Xe tiếp tế có bị giới hạn bước không.
+- [ ] Điều kiện nạp nhiên liệu từ xe tiếp tế.
 - [ ] Công thức traffic giữa các ngày.
-- [ ] Tie-break đầy đủ sau thời gian phản hồi.
+- [ ] Chuyện gì xảy ra khi hai xe cùng đội vào cùng một ô.
