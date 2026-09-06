@@ -156,3 +156,44 @@ nó hơn hay kém bản trước.
 | 3 | `strategy/rolling-horizon` | `bot-rolling-horizon-v1` | DATNT |
 | 4 | `strategy/beam-search` | `bot-beam-search-v1` | KIENNT |
 | 5 | `strategy/alns` | `bot-alns-v1` | DATNT |
+
+---
+
+## Bằng chứng từ trận thật đầu tiên có điểm
+
+`m-11538` — bot mẫu (BFS, chưa đọc `brand`) đấu bot AI mức `hard`.
+Dữ liệu đầy đủ: [`docs/observed/first-scoring-match.json`](observed/first-scoring-match.json).
+
+| Chỉ số (theo thứ tự ưu tiên) | Mình | AI | |
+|---|---:|---:|---|
+| 1. `udon_types` | **4** | **4** | hòa — cả hai mở hết 4 brand |
+| 2. `daily_types_sum` | 9 | **16** | **thua ở đây** |
+| 3. `udon_total` | 12 | **61** | thua đậm |
+| 4. `response_ms_total` | **870** | 1018 | mình nhanh hơn |
+
+Ba điều rút ra, đều có số làm bằng chứng:
+
+### Trận thắng thua ở tiêu chí 2, không phải tiêu chí 1
+
+Mở hết brand là chuyện dễ — bot ngây thơ cũng làm được. `daily_types_sum` là
+**tổng lũy kế số loại theo từng ngày**, nên mở sớm ăn nhiều hơn mở muộn rất
+nhiều. Mở đủ 4 loại ngay ngày 1 của trận 4 ngày cho `4+4+4+4 = 16`. Mình được
+`9`, tức mở dần (khoảng `1+2+3+3`).
+
+**Hệ quả:** hàm mục tiêu phải ưu tiên **mở brand mới càng sớm càng tốt**, chứ
+không phải "cuối trận có đủ brand". Đây là thứ dễ làm sai nhất khi viết hàm
+chấm điểm.
+
+### Ngân sách tính toán còn thừa rất nhiều
+
+`870ms` cho 4 ngày ≈ **218ms mỗi ngày**, trong khi `daySeconds` cho phép
+**60 000ms**. Mới dùng hết 0,4%.
+
+Poll `/state` 595 lần trong trận cũng không làm `response_ms_total` xấu đi —
+mình vẫn nhanh hơn AI. Vậy chỉ số này đo thời gian trả lời mỗi ngày, không phải
+lưu lượng request. Beam search rộng hoàn toàn nằm trong khả năng.
+
+### Khoảng cách `udon_total` cho thấy chỗ mất mát lớn nhất
+
+12 so với 61, gấp 5 lần. Bot mẫu chỉ thu ở spot đầu tiên gặp mỗi ngày và để hai
+xe cùng nhắm một spot. Bậc 2 (gán Hungarian) nhắm thẳng vào chỗ này.
