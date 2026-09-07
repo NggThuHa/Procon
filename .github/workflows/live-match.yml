@@ -64,9 +64,21 @@ jobs:
         env:
           PROCON_USERNAME: ${{ secrets.PROCON_USERNAME }}
           PROCON_PASSWORD: ${{ secrets.PROCON_PASSWORD }}
+          PROCON_URL: ${{ vars.PROCON_URL }}
+          PROCON_HOST: ${{ vars.PROCON_HOST }}
         run: |
+          set -euo pipefail
+          if [ -z "$PROCON_URL" ] || [ -z "$PROCON_HOST" ]; then
+            echo "Thiếu repository variables PROCON_URL/PROCON_HOST." >&2
+            exit 1
+          fi
+          python3 -m tools.tls_proxy --upstream "$PROCON_HOST" --port 8099 >tls-proxy.log 2>&1 &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true' EXIT
+          sleep 1
           python3 -m tools.live_match \
             --bot hexudon-bot-cpp/bot \
+            --bot-url http://127.0.0.1:8099 \
             --difficulty '${{ inputs.difficulty || 'hard' }}' \
             --days '${{ inputs.days || '4' }}' \
             --timeout 600 \
