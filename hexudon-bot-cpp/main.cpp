@@ -3,6 +3,7 @@
 // Build: g++ -std=c++17 -O2 -o bot main.cpp   (Windows nối thêm -lws2_32)
 #include <chrono>
 #include <cstdio>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -13,7 +14,18 @@
 using namespace std;
 
 static strategy::Setup g_setup;
+static strategy::State g_history;
 static int g_nAgents;
+
+static void rememberCollectedBrands(const strategy::State& state) {
+    if (state.day <= 0) return;
+    for (const strategy::Agent& agent : state.agents) {
+        if (agent.kind != 0) continue;
+        for (const strategy::Spot& spot : g_setup.spots) {
+            if (spot.pos == agent.pos) g_history.openedBrands.insert(spot.brand);
+        }
+    }
+}
 
 // parseSetup: đọc setup, đặt globals, TRẢ mảng loại agent (phẳng "[0,..,1]") để POST /assignment.
 static string parseSetup(const mj::Value& m) {
@@ -35,9 +47,11 @@ static string parseSetup(const mj::Value& m) {
     for (size_t i = 0; i < m["daySteps"].size(); i++)
         g_setup.daySteps.push_back(m["daySteps"][i].asInt());
     g_nAgents = static_cast<int>(m["agents"].size());
-    // Gán loại: xe cuối tiếp tế (1), còn lại tuần tra (0).
+    g_history = {};
+    // Tập trung toàn bộ xe vào thu thập: điều kiện hỗ trợ của xe tiếp tế
+    // chưa được xác minh, còn xe kind=1 không thu udon.
     ostringstream out; out << "[";
-    for (int i = 0; i < g_nAgents; i++) { if (i) out << ","; out << (i == g_nAgents - 1 && g_nAgents > 1 ? 1 : 0); }
+    for (int i = 0; i < g_nAgents; i++) { if (i) out << ","; out << 0; }
     out << "]";
     return out.str();
 }
@@ -57,6 +71,8 @@ static string planActions(const mj::Value& m) {
         agent.fuel = ags[i]["fuel"].isNull() ? (1 << 30) : ags[i]["fuel"].asInt();
         state.agents.push_back(agent);
     }
+    rememberCollectedBrands(state);
+    state.openedBrands = g_history.openedBrands;
 
     const strategy::Plan plan = strategy::planHungarian(g_setup, state);
     ostringstream out;
@@ -110,7 +126,12 @@ int main(int argc, char** argv) {
             if (day != lastDay) {
                 string acts = planActions(*v);
                 auto pr = http::request(base, "POST", "/actions", token, acts);
-                if (pr.status == 200) { lastDay = day; fprintf(stderr, "ngay %d: da gui ke hoach\n", day); }
+                if (pr.status == 200) {
+                    lastDay = day;
+                    fprintf(stderr, "ngay %d: da gui ke hoach\n", day);
+                    // The next /state is the first trustworthy snapshot of
+                    // where the patrols actually ended; update brand history there.
+                }
                 // 429/lỗi: giữ lastDay để vòng sau gửi lại.
             }
         } else if (r.status != 429 && r.status != 0) {

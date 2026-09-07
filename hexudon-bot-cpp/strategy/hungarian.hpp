@@ -34,6 +34,7 @@ struct State {
     int day = 0;
     std::vector<Agent> agents;
     std::map<int, int> traffic;
+    std::set<int> openedBrands;
 };
 
 struct Plan {
@@ -256,36 +257,52 @@ inline Plan planHungarian(const Setup& setup, const State& state) {
     }
     if (patrolIndices.empty() || setup.spots.empty()) return plan;
 
-    // Only keep one entry for a position: the server collects from the spot
-    // where the vehicle stops, so duplicate positions are the same target.
-    std::vector<int> spots;
-    std::set<int> seenSpots;
+    // Assignment columns are brands, not individual spots. This prevents two
+    // patrol vehicles from spending the same day on two spots of one brand
+    // while another brand is still unopened.
+    std::vector<int> brands;
+    std::set<int> seenBrands;
     for (const Spot& spot : setup.spots)
-        if (seenSpots.insert(spot.pos).second) spots.push_back(spot.pos);
+        if (seenBrands.insert(spot.brand).second) brands.push_back(spot.brand);
 
     const int rowCount = static_cast<int>(patrolIndices.size());
-    const int spotCount = static_cast<int>(spots.size());
-    std::vector<std::vector<int>> costs(rowCount, std::vector<int>(spotCount + rowCount, detail::INF));
-    std::vector<std::vector<Route>> routes(rowCount, std::vector<Route>(spotCount));
+    const int brandCount = static_cast<int>(brands.size());
+    const int newBrandBonus = (static_cast<int>(setup.daySteps.size()) + 1) * 1000;
+    std::vector<std::vector<int>> costs(rowCount, std::vector<int>(brandCount + rowCount, detail::INF));
+    std::vector<std::vector<Route>> routes(rowCount, std::vector<Route>(brandCount));
 
     for (int row = 0; row < rowCount; ++row) {
         const Agent& agent = state.agents[patrolIndices[row]];
-        for (int spot = 0; spot < spotCount; ++spot) {
-            Route route;
-            if (!detail::findRoute(setup, state, agent.pos, spots[spot],
-                                    steps, agent.fuel, route)) continue;
-            routes[row][spot] = route;
-            costs[row][spot] = route.steps;
+        for (int brandIndex = 0; brandIndex < brandCount; ++brandIndex) {
+            bool found = false;
+            Route bestRoute;
+            for (const Spot& spot : setup.spots) {
+                if (spot.brand != brands[brandIndex]) continue;
+                Route route;
+                if (!detail::findRoute(setup, state, agent.pos, spot.pos,
+                                       steps, agent.fuel, route)) continue;
+                if (!found || route.steps < bestRoute.steps ||
+                    (route.steps == bestRoute.steps && route.fuel < bestRoute.fuel)) {
+                    bestRoute = route;
+                    found = true;
+                }
+            }
+            if (!found) continue;
+            routes[row][brandIndex] = bestRoute;
+            costs[row][brandIndex] = bestRoute.steps;
+            if (!state.openedBrands.count(brands[brandIndex]))
+                costs[row][brandIndex] -= newBrandBonus;
         }
         // A dummy target means this vehicle safely waits instead of taking an
         // infeasible route. Its cost is larger than any feasible route.
-        for (int dummy = 0; dummy < rowCount; ++dummy) costs[row][spotCount + dummy] = steps + 1;
+        for (int dummy = 0; dummy < rowCount; ++dummy)
+            costs[row][brandCount + dummy] = steps + 1;
     }
 
     const std::vector<int> assignment = detail::hungarian(costs);
     for (int row = 0; row < rowCount; ++row) {
         const int column = row < static_cast<int>(assignment.size()) ? assignment[row] : -1;
-        if (column < 0 || column >= spotCount || costs[row][column] >= detail::INF) continue;
+        if (column < 0 || column >= brandCount || costs[row][column] >= detail::INF) continue;
 
         const Route& route = routes[row][column];
         std::vector<int>& action = plan.actions[patrolIndices[row]];

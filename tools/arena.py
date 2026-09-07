@@ -25,6 +25,7 @@ class MatchServer(ThreadingHTTPServer):
         self.match = Simulator(setup)
         self.assignment = None
         self.actions_received = 0
+        self.actions = []
         self.invalid_actions = []
         self.lock = threading.Lock()
 
@@ -87,6 +88,7 @@ class MatchHandler(BaseHTTPRequestHandler):
                         raise ValueError("assignment chưa được gửi")
                     match.step(payload)
                     self.server.actions_received += 1
+                    self.server.actions.append(payload)
                     self._send_json(200, {"valid": True})
                 except Exception as exc:
                     self.server.invalid_actions.append(str(exc))
@@ -134,6 +136,9 @@ def run_match(setup_path, bot, timeout):
             "score": server.match.score(),
             "days": server.match.day,
             "expected_days": server.match.n_days,
+            "positions": list(server.match.positions),
+            "visited": server.match.visited,
+            "actions_payloads": server.actions,
             "actions": server.actions_received,
             "invalid_actions": list(server.invalid_actions),
             "bot_returncode": return_code,
