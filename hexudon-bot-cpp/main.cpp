@@ -90,6 +90,17 @@ static string planActions(const mj::Value& m) {
     return out.str();
 }
 
+static bool actionAccepted(const http::Response& response) {
+    if (response.status != 200) return false;
+    try {
+        auto body = mj::parse(response.body);
+        const mj::Value& valid = (*body)["valid"];
+        return valid.type == mj::Value::BOOL && valid.boolean;
+    } catch (...) {
+        return false;
+    }
+}
+
 static void sleepMs(int ms) { this_thread::sleep_for(chrono::milliseconds(ms)); }
 
 int main(int argc, char** argv) {
@@ -126,11 +137,13 @@ int main(int argc, char** argv) {
             if (day != lastDay) {
                 string acts = planActions(*v);
                 auto pr = http::request(base, "POST", "/actions", token, acts);
-                if (pr.status == 200) {
+                if (actionAccepted(pr)) {
                     lastDay = day;
                     fprintf(stderr, "ngay %d: da gui ke hoach\n", day);
                     // The next /state is the first trustworthy snapshot of
                     // where the patrols actually ended; update brand history there.
+                } else if (pr.status == 200) {
+                    fprintf(stderr, "ngay %d: action bi tu choi\n", day);
                 }
                 // 429/lỗi: giữ lastDay để vòng sau gửi lại.
             }
