@@ -67,8 +67,8 @@ jobs:
         run: |
           python3 -m tools.live_match \
             --bot hexudon-bot-cpp/bot \
-            --difficulty '${{ inputs.difficulty || ''hard'' }}' \
-            --days '${{ inputs.days || ''4'' }}' \
+            --difficulty '${{ inputs.difficulty || 'hard' }}' \
+            --days '${{ inputs.days || '4' }}' \
             --timeout 600 \
             --out match-result.md
 
