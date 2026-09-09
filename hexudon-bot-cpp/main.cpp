@@ -35,13 +35,30 @@ struct Route {
     int fuel = 0;
 };
 
+struct AgentDraft {
+    int start = 0;
+    int end = 0;
+    int usedSteps = 0;
+    int startFuel = 0;
+    int fuelLeft = 0;
+};
+
+struct PendingTrace {
+    int day = -1;
+    set<int> brands;
+    map<int,int> spotVisits;
+};
+
 static int W, H, g_nAgents;
 static vector<int> g_cells;    // phẳng row*W+col (0 đất,1 đường,2 núi,3 ao)
 static vector<Spot> g_spots;   // các điểm udon: brand/pos/stocks
 static vector<int> g_daySteps; // số bước mỗi ngày
+static int g_fuelLimit = 0;
+static int g_patrolCount = 0;
+static int g_supplyCount = 0;
+static int g_totalBrands = 0;
 static set<int> g_collectedBrands;
-static set<int> g_pendingBrands;
-static int g_pendingDay = -1;
+static PendingTrace g_pendingTrace;
 
 static int neighbor(int pos, int d) {
     if (W <= 0) return -1;
@@ -133,6 +150,66 @@ static Route dijkstraRoute(int src, int dst, const map<int,int>& status, int ste
     return out;
 }
 
+static int iabs(int x) { return x < 0 ? -x : x; }
+
+static int roughDistance(int a, int b) {
+    if (W <= 0) return 0;
+    int ar = a / W, ac = a % W;
+    int br = b / W, bc = b % W;
+    return iabs(ar - br) + iabs(ac - bc);
+}
+
+static const Spot* spotAt(int pos) {
+    for (const auto& sp : g_spots) if (sp.pos == pos) return &sp;
+    return nullptr;
+}
+
+static bool recordVisit(int pos, set<int>& seenByAgent, map<int,int>& spotUseToday,
+                        set<int>& lifetimeBrands, set<int>& dailyBrands,
+                        set<int>* collectedNow) {
+    const Spot* sp = spotAt(pos);
+    if (!sp || seenByAgent.count(pos)) return false;
+    int stockCap = max(1, sp->stocks);
+    if (spotUseToday[pos] >= stockCap) return false;
+
+    seenByAgent.insert(pos);
+    spotUseToday[pos]++;
+    lifetimeBrands.insert(sp->brand);
+    dailyBrands.insert(sp->brand);
+    if (collectedNow) collectedNow->insert(sp->brand);
+    return true;
+}
+
+static PendingTrace tracePlan(const vector<vector<int>>& plan, const mj::Value& state,
+                              const map<int,int>& status) {
+    PendingTrace trace;
+    trace.day = state["day"].asInt();
+    const mj::Value& ags = state["agents"];
+    set<int> lifetime = g_collectedBrands;
+    set<int> daily;
+
+    for (size_t i = 0; i < plan.size() && i < ags.size(); i++) {
+        if (ags[i]["kind"].asInt() != 0) continue;
+        int pos = ags[i]["pos"].asInt();
+        set<int> seenByAgent;
+        recordVisit(pos, seenByAgent, trace.spotVisits, lifetime, daily, &trace.brands);
+
+        for (int cmd : plan[i]) {
+            if (cmd < 0) {
+                recordVisit(pos, seenByAgent, trace.spotVisits, lifetime, daily, &trace.brands);
+                continue;
+            }
+            int dst = neighbor(pos, cmd);
+            if (dst < 0) break;
+            auto c = moveCost(pos, status.count(pos) ? status.at(pos) : 0);
+            if (c.first < 0) break;
+            pos = dst;
+            recordVisit(pos, seenByAgent, trace.spotVisits, lifetime, daily, &trace.brands);
+        }
+    }
+    return trace;
+}
+
 static vector<vector<int>> waitPlan(size_t nAgents, int steps) {
     vector<vector<int>> plan(nAgents);
     for (auto& cmds : plan) if (steps > 0) cmds.push_back(-steps);
@@ -213,32 +290,81 @@ static bool validatePlan(const vector<vector<int>>& plan, const mj::Value& state
     return true;
 }
 
-static vector<vector<int>> buildBrandGreedyPlan(const mj::Value& state, const map<int,int>& status, int steps) {
+static void appendRouteCommands(vector<int>& cmds, const Route& route) {
+    for (int d : route.dirs) cmds.push_back(d);
+}
+
+static int maxDaySteps() {
+    int mx = 0;
+    for (int steps : g_daySteps) mx = max(mx, steps);
+    return mx;
+}
+
+static int chooseSupplyCount() {
+    if (g_nAgents <= 1) return 0;
+
+    int longestDay = maxDaySteps();
+    bool smallMap = W * H <= 100 || max(W, H) <= 10;
+    bool fullDayFuel = longestDay > 0 && g_fuelLimit >= longestDay * 2;
+    bool tightFuel = longestDay > 0 && g_fuelLimit > 0 &&
+                     g_fuelLimit <= longestDay + max(3, longestDay / 5);
+
+    int supply = 1;
+    if (g_nAgents >= 6) supply = 2;
+    if (g_nAgents >= 8) supply = 3;
+    if (g_nAgents >= 8 && smallMap && fullDayFuel && !tightFuel) supply = 2;
+
+    supply = min(supply, g_nAgents - 1);
+    return max(1, supply);
+}
+
+static bool shouldReserveRefuelStep(int fuel, int steps) {
+    if (g_supplyCount <= 0 || g_fuelLimit <= 0) return false;
+    if (fuel <= max(2, g_fuelLimit / 3)) return true;
+    return steps > 0 && fuel <= max(3, steps / 2);
+}
+
+static vector<vector<int>> buildSplitRefuelPlan(const mj::Value& state, const map<int,int>& status, int steps) {
     const mj::Value& ags = state["agents"];
     vector<vector<int>> plan(ags.size());
+    vector<AgentDraft> draft(ags.size());
+    vector<int> patrols, supplies;
     map<int,int> spotUseToday;
     set<int> lifetimeBrands = g_collectedBrands;
     set<int> dailyBrands;
-
-    g_pendingBrands.clear();
-    g_pendingDay = state["day"].asInt();
 
     for (size_t i = 0; i < ags.size(); i++) {
         int kind = ags[i]["kind"].asInt();
         int cur = ags[i]["pos"].asInt();
         int fuel = ags[i]["fuel"].isNull() ? (1 << 28) : ags[i]["fuel"].asInt();
+        draft[i].start = draft[i].end = cur;
+        draft[i].startFuel = draft[i].fuelLeft = fuel;
+        if (kind == 0) patrols.push_back((int)i);
+        else supplies.push_back((int)i);
+    }
+
+    vector<int> patrolAnchors;
+
+    for (int idx : patrols) {
+        int cur = draft[idx].start;
+        int fuel = draft[idx].startFuel;
         int used = 0;
+        int anchor = -1;
+        int patrolReserve = shouldReserveRefuelStep(fuel, steps) ? 1 : 0;
         set<int> visitedSpotsByThisAgent;
 
-        if (kind != 0) {
-            if (steps > 0) plan[i].push_back(-steps);
-            continue;
+        if (spotAt(cur) && used < steps) {
+            plan[idx].push_back(-1);
+            used++;
+            recordVisit(cur, visitedSpotsByThisAgent, spotUseToday, lifetimeBrands, dailyBrands, nullptr);
+            anchor = cur;
         }
 
-        while (used < steps) {
+        while (used + patrolReserve < steps) {
             int bestSpot = -1;
             int bestScore = numeric_limits<int>::min();
             Route bestRoute;
+            int routeBudget = steps - used - patrolReserve;
 
             for (size_t si = 0; si < g_spots.size(); si++) {
                 const Spot& sp = g_spots[si];
@@ -246,18 +372,35 @@ static vector<vector<int>> buildBrandGreedyPlan(const mj::Value& state, const ma
                 int stockCap = max(1, sp.stocks);
                 if (spotUseToday[sp.pos] >= stockCap) continue;
 
-                Route r = dijkstraRoute(cur, sp.pos, status, steps - used, fuel);
+                Route r = dijkstraRoute(cur, sp.pos, status, routeBudget, fuel);
                 if (!r.ok) continue;
 
                 bool newLifetimeBrand = lifetimeBrands.count(sp.brand) == 0;
                 bool newDailyBrand = dailyBrands.count(sp.brand) == 0;
-                int score = 0;
-                if (newLifetimeBrand) score += 1000000;
-                if (newDailyBrand) score += 100000;
-                score += min(stockCap, 8) * 1000;
-                score -= r.steps * 25;
-                score -= r.fuel * 5;
-                score -= spotUseToday[sp.pos] * 500;
+                int remainingStock = stockCap - spotUseToday[sp.pos];
+                bool reusedSpotByTeam = spotUseToday[sp.pos] > 0;
+                bool allKnownBrands = g_totalBrands > 0 &&
+                                      (int)lifetimeBrands.size() >= g_totalBrands;
+                bool allDailyBrands = g_totalBrands > 0 &&
+                                      (int)dailyBrands.size() >= g_totalBrands;
+
+                int score = 60000; // moi slot stock con lai la mot phan udon that.
+                if (newLifetimeBrand) score += 1200000;
+                if (newDailyBrand) score += 260000;
+                if (allKnownBrands && allDailyBrands) score += 50000;
+                score += remainingStock * (reusedSpotByTeam ? 26000 : 14000);
+                score += min(stockCap, 8) * 5000;
+                if (reusedSpotByTeam) score += 45000;
+                score -= r.steps * (allDailyBrands ? 1600 : 750);
+                score -= r.fuel * 120;
+
+                if (!patrolAnchors.empty() && !reusedSpotByTeam) {
+                    int sep = numeric_limits<int>::max();
+                    for (int other : patrolAnchors) sep = min(sep, roughDistance(sp.pos, other));
+                    score += min(sep, max(W, H)) * 900;
+                    if (sep <= 2) score -= 18000;
+                    else if (sep <= 4) score -= 5000;
+                }
 
                 if (score > bestScore ||
                     (score == bestScore && (bestSpot < 0 ||
@@ -273,32 +416,82 @@ static vector<vector<int>> buildBrandGreedyPlan(const mj::Value& state, const ma
 
             const Spot& sp = g_spots[bestSpot];
             if (bestRoute.steps == 0 && used < steps) {
-                plan[i].push_back(-1); // dam bao xe dung tren spot toi thieu 1 step truoc khi roi di
+                plan[idx].push_back(-1);
                 used += 1;
             }
-            for (int d : bestRoute.dirs) plan[i].push_back(d);
+            appendRouteCommands(plan[idx], bestRoute);
             used += bestRoute.steps;
             fuel -= bestRoute.fuel;
             cur = sp.pos;
 
-            visitedSpotsByThisAgent.insert(sp.pos);
-            spotUseToday[sp.pos]++;
-            lifetimeBrands.insert(sp.brand);
-            dailyBrands.insert(sp.brand);
-            g_pendingBrands.insert(sp.brand);
+            if (anchor < 0) anchor = sp.pos;
+            if (bestRoute.cells.empty()) {
+                recordVisit(cur, visitedSpotsByThisAgent, spotUseToday, lifetimeBrands, dailyBrands, nullptr);
+            } else {
+                for (int cell : bestRoute.cells)
+                    recordVisit(cell, visitedSpotsByThisAgent, spotUseToday, lifetimeBrands, dailyBrands, nullptr);
+            }
         }
 
-        if (used < steps) plan[i].push_back(-(steps - used));
-        if (plan[i].empty() && steps > 0) plan[i].push_back(-steps);
+        if (used < steps) plan[idx].push_back(-(steps - used));
+        if (plan[idx].empty() && steps > 0) plan[idx].push_back(-steps);
+        draft[idx].end = cur;
+        draft[idx].usedSteps = used;
+        draft[idx].fuelLeft = fuel;
+        patrolAnchors.push_back(anchor >= 0 ? anchor : cur);
     }
+
+    vector<int> served(ags.size(), 0);
+    for (int idx : supplies) {
+        int cur = draft[idx].start;
+        int bestPatrol = -1;
+        int bestScore = numeric_limits<int>::min();
+        Route bestRoute;
+
+        for (int pass = 0; pass < 2 && bestPatrol < 0; pass++) {
+            int supplyBudget = steps - (pass == 0 ? 1 : 0);
+            if (supplyBudget < 0) continue;
+            for (int pidx : patrols) {
+                int target = draft[pidx].end;
+                Route r = dijkstraRoute(cur, target, status, supplyBudget, 1 << 28);
+                if (!r.ok) continue;
+
+                int overlap = steps - max(draft[pidx].usedSteps, r.steps);
+                int missingFuel = max(0, g_fuelLimit - draft[pidx].fuelLeft);
+                bool lowFuel = g_fuelLimit > 0 && draft[pidx].fuelLeft <= max(2, g_fuelLimit / 3);
+                int score = missingFuel * 1000 - r.steps * 40 - served[pidx] * 70000;
+                if (lowFuel) score += 120000;
+                if (overlap > 0) score += 60000;
+                if (pass == 1) score -= 30000; // fallback: co the chi dung chung o dau ngay sau
+
+                if (score > bestScore ||
+                    (score == bestScore && (bestPatrol < 0 || r.steps < bestRoute.steps))) {
+                    bestScore = score;
+                    bestPatrol = pidx;
+                    bestRoute = r;
+                }
+            }
+        }
+
+        if (bestPatrol >= 0) {
+            appendRouteCommands(plan[idx], bestRoute);
+            int used = bestRoute.steps;
+            if (used < steps) plan[idx].push_back(-(steps - used));
+            served[bestPatrol]++;
+            draft[idx].end = draft[bestPatrol].end;
+            draft[idx].usedSteps = used;
+        } else if (steps > 0) {
+            plan[idx].push_back(-steps);
+        }
+    }
+
     return plan;
 }
 
-static void commitPendingBrands(int day) {
-    if (g_pendingDay != day) return;
-    for (int brand : g_pendingBrands) g_collectedBrands.insert(brand);
-    g_pendingBrands.clear();
-    g_pendingDay = -1;
+static void commitPendingTrace(int day) {
+    if (g_pendingTrace.day != day) return;
+    for (int brand : g_pendingTrace.brands) g_collectedBrands.insert(brand);
+    g_pendingTrace = PendingTrace();
 }
 
 static bool actionAccepted(const http::Response& r, string* reason) {
@@ -320,8 +513,7 @@ static bool actionAccepted(const http::Response& r, string* reason) {
 // parseSetup: đọc setup, đặt globals, TRẢ mảng loại agent (phẳng "[0,..,1]") để POST /assignment.
 static string parseSetup(const mj::Value& m) {
     g_collectedBrands.clear();
-    g_pendingBrands.clear();
-    g_pendingDay = -1;
+    g_pendingTrace = PendingTrace();
 
     const mj::Value& mp = m["map"];
     W = mp["width"].asInt(); H = mp["height"].asInt();
@@ -330,24 +522,30 @@ static string parseSetup(const mj::Value& m) {
         for (int c = 0; c < W; c++)
             g_cells[r * W + c] = mp["cells"][r][c].asInt();
     g_spots.clear();
+    set<int> setupBrands;
     for (size_t i = 0; i < m["spots"].size(); i++) {
         Spot s;
         s.brand = m["spots"][i]["brand"].asInt();
         s.pos = m["spots"][i]["pos"].asInt();
         s.stocks = max(1, m["spots"][i]["stocks"].asInt());
         g_spots.push_back(s);
+        setupBrands.insert(s.brand);
     }
+    g_totalBrands = (int)setupBrands.size();
     g_daySteps.clear();
     for (size_t i = 0; i < m["daySteps"].size(); i++) g_daySteps.push_back(m["daySteps"][i].asInt());
+    g_fuelLimit = m["fuelLimits"].asInt();
     g_nAgents = (int)m["agents"].size();
-    // Gán loại: xe cuối tiếp tế (1), còn lại tuần tra (0).
+    // Uu tien xe tuan tra vi moi xe co the thu phan udon rieng theo stock/ngay.
+    g_supplyCount = chooseSupplyCount();
+    g_patrolCount = g_nAgents - g_supplyCount;
     ostringstream out; out << "[";
-    for (int i = 0; i < g_nAgents; i++) { if (i) out << ","; out << (i == g_nAgents - 1 && g_nAgents > 1 ? 1 : 0); }
+    for (int i = 0; i < g_nAgents; i++) { if (i) out << ","; out << (i < g_patrolCount ? 0 : 1); }
     out << "]";
     return out.str();
 }
 
-// planActions: Dijkstra theo chi phi that, uu tien mo brand moi va validate truoc khi gui.
+// planActions: chia xe thu udon/cap nhien lieu, Dijkstra theo chi phi that, validate truoc khi gui.
 static string planActions(const mj::Value& m) {
     int day = m["day"].asInt();
     int steps = (day >= 0 && day < (int)g_daySteps.size()) ? g_daySteps[day] : 30;
@@ -356,14 +554,13 @@ static string planActions(const mj::Value& m) {
         status[m["traffics"][i]["pos"].asInt()] = m["traffics"][i]["status"].asInt();
     const mj::Value& ags = m["agents"];
 
-    vector<vector<int>> plan = buildBrandGreedyPlan(m, status, steps);
+    vector<vector<int>> plan = buildSplitRefuelPlan(m, status, steps);
     string err;
     if (!validatePlan(plan, m, steps, status, &err)) {
         fprintf(stderr, "validator chan plan ngay %d: %s; dung yen fallback\n", day, err.c_str());
-        g_pendingBrands.clear();
-        g_pendingDay = day;
         plan = waitPlan(ags.size(), steps);
     }
+    g_pendingTrace = tracePlan(plan, m, status);
     return renderPlan(plan);
 }
 
@@ -373,7 +570,7 @@ int main(int argc, char** argv) {
     if (argc < 4) { fprintf(stderr, "dung: %s <URL> <MATCH_ID> <TOKEN>\n", argv[0]); return 2; }
     string base = string(argv[1]) + "/api/v1/matches/" + argv[2];
     string token = argv[3];
-    const int POLL_MS = 250; // >= 200ms tránh 429
+    const int POLL_MS = 205; // >= 200ms, giam do tre nhan state moi
 
     // 1) SETUP — chờ tới khi lấy được (425 = bản đồ chưa mở / trận chưa tới giờ).
     string assignBody;
@@ -383,12 +580,19 @@ int main(int argc, char** argv) {
         if (r.status == 0 || r.status == 425 || r.status == 429) { sleepMs(POLL_MS); continue; }
         fprintf(stderr, "GET /setup -> HTTP %d (token sai / match khong hop le?)\n", r.status); return 1;
     }
-    fprintf(stderr, "nhan setup: %dx%d o, %zu diem, %d xe\n", W, H, g_spots.size(), g_nAgents);
+    fprintf(stderr, "nhan setup: %dx%d o, %zu diem, %d xe (%d tuan tra, %d tiep te)\n",
+            W, H, g_spots.size(), g_nAgents, g_patrolCount, g_supplyCount);
 
     // 2) ASSIGNMENT — gửi loại agent (cố định cả trận).
     for (;;) {
         auto r = http::request(base, "POST", "/assignment", token, assignBody);
-        if (r.status == 200) break;
+        string reason;
+        if (actionAccepted(r, &reason)) break;
+        if (r.status == 200) {
+            fprintf(stderr, "POST /assignment bi tu choi%s%s\n",
+                    reason.empty() ? "" : ": ", reason.c_str());
+            return 1;
+        }
         if (r.status == 0 || r.status == 429) { sleepMs(POLL_MS); continue; }
         fprintf(stderr, "POST /assignment -> HTTP %d\n", r.status); return 1;
     }
@@ -405,7 +609,7 @@ int main(int argc, char** argv) {
                 auto pr = http::request(base, "POST", "/actions", token, acts);
                 string reason;
                 if (actionAccepted(pr, &reason)) {
-                    commitPendingBrands(day);
+                    commitPendingTrace(day);
                     lastDay = day;
                     fprintf(stderr, "ngay %d: da gui ke hoach, da biet %zu brand\n", day, g_collectedBrands.size());
                 } else if (pr.status == 200) {
