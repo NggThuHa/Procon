@@ -49,6 +49,12 @@ struct PendingTrace {
     map<int,int> spotVisits;
 };
 
+enum FuelMode {
+    FUEL_LOW,
+    FUEL_MEDIUM,
+    FUEL_HIGH
+};
+
 static int W, H, g_nAgents;
 static vector<int> g_cells;    // phẳng row*W+col (0 đất,1 đường,2 núi,3 ao)
 static vector<Spot> g_spots;   // các điểm udon: brand/pos/stocks
@@ -57,6 +63,7 @@ static int g_fuelLimit = 0;
 static int g_patrolCount = 0;
 static int g_supplyCount = 0;
 static int g_totalBrands = 0;
+static FuelMode g_fuelMode = FUEL_MEDIUM;
 static set<int> g_collectedBrands;
 static PendingTrace g_pendingTrace;
 
@@ -150,18 +157,15 @@ static Route dijkstraRoute(int src, int dst, const map<int,int>& status, int ste
     return out;
 }
 
-static int iabs(int x) { return x < 0 ? -x : x; }
-
-static int roughDistance(int a, int b) {
-    if (W <= 0) return 0;
-    int ar = a / W, ac = a % W;
-    int br = b / W, bc = b % W;
-    return iabs(ar - br) + iabs(ac - bc);
-}
-
 static const Spot* spotAt(int pos) {
     for (const auto& sp : g_spots) if (sp.pos == pos) return &sp;
     return nullptr;
+}
+
+static int spotIndexAt(int pos) {
+    for (size_t i = 0; i < g_spots.size(); i++)
+        if (g_spots[i].pos == pos) return (int)i;
+    return -1;
 }
 
 static bool recordVisit(int pos, set<int>& seenByAgent, map<int,int>& spotUseToday,
@@ -300,19 +304,33 @@ static int maxDaySteps() {
     return mx;
 }
 
+static FuelMode classifyFuelMode() {
+    int longestDay = maxDaySteps();
+    if (longestDay <= 0 || g_fuelLimit <= 0) return FUEL_MEDIUM;
+
+    int lowLimit = longestDay + max(3, longestDay / 5);
+    int mediumLimit = longestDay * 2 + max(2, longestDay / 10);
+    if (g_fuelLimit <= lowLimit) return FUEL_LOW;
+    if (g_fuelLimit <= mediumLimit) return FUEL_MEDIUM;
+    return FUEL_HIGH;
+}
+
+static const char* fuelModeName(FuelMode mode) {
+    switch (mode) {
+        case FUEL_LOW: return "low";
+        case FUEL_HIGH: return "high";
+        default: return "medium";
+    }
+}
+
 static int chooseSupplyCount() {
     if (g_nAgents <= 1) return 0;
 
-    int longestDay = maxDaySteps();
-    bool smallMap = W * H <= 100 || max(W, H) <= 10;
-    bool fullDayFuel = longestDay > 0 && g_fuelLimit >= longestDay * 2;
-    bool tightFuel = longestDay > 0 && g_fuelLimit > 0 &&
-                     g_fuelLimit <= longestDay + max(3, longestDay / 5);
+    if (g_fuelMode != FUEL_LOW) return 1;
 
     int supply = 1;
     if (g_nAgents >= 6) supply = 2;
     if (g_nAgents >= 8) supply = 3;
-    if (g_nAgents >= 8 && smallMap && fullDayFuel && !tightFuel) supply = 2;
 
     supply = min(supply, g_nAgents - 1);
     return max(1, supply);
@@ -324,15 +342,284 @@ static bool shouldReserveRefuelStep(int fuel, int steps) {
     return steps > 0 && fuel <= max(3, steps / 2);
 }
 
+struct BeamAgent {
+    int pos = 0;
+    int fuel = 0;
+    int used = 0;
+    vector<int> cmds;
+    set<int> seenSpots;
+};
+
+struct BeamState {
+    vector<BeamAgent> agents;
+    vector<int> spotUse;
+    set<int> lifetimeBrands;
+    set<int> dailyBrands;
+    int portions = 0;
+    int usedStepsTotal = 0;
+    int fuelUsed = 0;
+};
+
+struct BeamGain {
+    int portions = 0;
+    int newLifetime = 0;
+    int newDaily = 0;
+    int reusedPortions = 0;
+};
+
+struct BeamExpansion {
+    int agent = 0;
+    Route route;
+    BeamGain gain;
+    long long score = 0;
+};
+
+static bool recordBeamVisitLite(int spotIdx, set<int>& seenSpots, vector<int>& spotUse,
+                                set<int>& lifetimeBrands, set<int>& dailyBrands,
+                                BeamGain* gain) {
+    if (spotIdx < 0 || spotIdx >= (int)g_spots.size()) return false;
+    const Spot& sp = g_spots[spotIdx];
+    if (seenSpots.count(spotIdx)) return false;
+    if (spotUse[spotIdx] >= max(1, sp.stocks)) return false;
+
+    bool reused = spotUse[spotIdx] > 0;
+    bool newLifetime = lifetimeBrands.count(sp.brand) == 0;
+    bool newDaily = dailyBrands.count(sp.brand) == 0;
+
+    seenSpots.insert(spotIdx);
+    spotUse[spotIdx]++;
+    lifetimeBrands.insert(sp.brand);
+    dailyBrands.insert(sp.brand);
+
+    if (gain) {
+        gain->portions++;
+        if (newLifetime) gain->newLifetime++;
+        if (newDaily) gain->newDaily++;
+        if (reused) gain->reusedPortions++;
+    }
+    return true;
+}
+
+static bool recordBeamVisit(int spotIdx, BeamState& st, int agentIdx, BeamGain* gain) {
+    bool ok = recordBeamVisitLite(spotIdx, st.agents[agentIdx].seenSpots, st.spotUse,
+                                  st.lifetimeBrands, st.dailyBrands, gain);
+    if (ok) st.portions++;
+    return ok;
+}
+
+static BeamGain measureBeamRoute(const BeamState& st, int agentIdx, const Route& route) {
+    set<int> seenSpots = st.agents[agentIdx].seenSpots;
+    vector<int> spotUse = st.spotUse;
+    set<int> lifetimeBrands = st.lifetimeBrands;
+    set<int> dailyBrands = st.dailyBrands;
+    BeamGain gain;
+    if (route.cells.empty()) {
+        recordBeamVisitLite(spotIndexAt(st.agents[agentIdx].pos), seenSpots, spotUse,
+                            lifetimeBrands, dailyBrands, &gain);
+    } else {
+        for (int cell : route.cells)
+            recordBeamVisitLite(spotIndexAt(cell), seenSpots, spotUse,
+                                lifetimeBrands, dailyBrands, &gain);
+    }
+    return gain;
+}
+
+static long long beamScore(const BeamState& st) {
+    long long score = 0;
+    int newLifetime = max(0, (int)st.lifetimeBrands.size() - (int)g_collectedBrands.size());
+    int daily = (int)st.dailyBrands.size();
+
+    score += (long long)newLifetime * 100000000000LL;
+    score += (long long)daily * 4500000000LL;
+    if (g_totalBrands > 0 && daily >= g_totalBrands) score += 900000000LL;
+    score += (long long)st.portions * 140000000LL;
+
+    for (const BeamAgent& ag : st.agents) {
+        int si = spotIndexAt(ag.pos);
+        if (si >= 0) score += (long long)min(max(1, g_spots[si].stocks), 8) * 6000000LL;
+    }
+
+    score -= (long long)st.usedStepsTotal * (g_fuelMode == FUEL_LOW ? 450000LL : 900000LL);
+    score -= (long long)st.fuelUsed * (g_fuelMode == FUEL_LOW ? 220000LL : 320000LL);
+    return score;
+}
+
+static long long beamExpansionScore(const BeamState& st, const Route& route, const BeamGain& gain) {
+    bool dailyPhase = g_totalBrands <= 0 || (int)st.dailyBrands.size() < g_totalBrands;
+    long long score = 0;
+    score += (long long)gain.newLifetime * 100000000000LL;
+    score += (long long)gain.newDaily * 5500000000LL;
+    score += (long long)gain.portions * 220000000LL;
+
+    if (dailyPhase && gain.newDaily == 0) score -= 2500000000LL;
+    if (!dailyPhase || (int)st.dailyBrands.size() + gain.newDaily >= g_totalBrands) {
+        score += (long long)gain.reusedPortions * 90000000LL;
+    }
+
+    int stepPenalty = dailyPhase ? 1100000 : (g_fuelMode == FUEL_LOW ? 1700000 : 3200000);
+    int fuelPenalty = dailyPhase ? 180000 : (g_fuelMode == FUEL_LOW ? 260000 : 420000);
+    score -= (long long)route.steps * stepPenalty;
+    score -= (long long)route.fuel * fuelPenalty;
+    return score;
+}
+
+static map<pair<int,int>, Route> buildRouteCache(const vector<int>& sourcePositions,
+                                                 const map<int,int>& status, int steps) {
+    set<int> sources;
+    for (int src : sourcePositions) sources.insert(src);
+    for (const Spot& sp : g_spots) sources.insert(sp.pos);
+
+    map<pair<int,int>, Route> cache;
+    int fuelCap = g_fuelLimit > 0 ? g_fuelLimit : max(1, steps * 2);
+    for (int src : sources)
+        for (const Spot& sp : g_spots)
+            cache[make_pair(src, sp.pos)] = dijkstraRoute(src, sp.pos, status, steps, fuelCap);
+    return cache;
+}
+
+static void applyBeamRoute(BeamState& st, int agentIdx, const Route& route, int steps) {
+    BeamAgent& ag = st.agents[agentIdx];
+    if (route.steps == 0) {
+        if (ag.used < steps) {
+            ag.cmds.push_back(-1);
+            ag.used++;
+            st.usedStepsTotal++;
+            recordBeamVisit(spotIndexAt(ag.pos), st, agentIdx, nullptr);
+        }
+        return;
+    }
+
+    appendRouteCommands(ag.cmds, route);
+    ag.used += route.steps;
+    ag.fuel -= route.fuel;
+    st.usedStepsTotal += route.steps;
+    st.fuelUsed += route.fuel;
+    for (int cell : route.cells) recordBeamVisit(spotIndexAt(cell), st, agentIdx, nullptr);
+    if (!route.cells.empty()) ag.pos = route.cells.back();
+}
+
+static void planPatrolsWithBeam(const vector<int>& patrols, const map<int,int>& status, int steps,
+                                vector<vector<int>>& plan, vector<AgentDraft>& draft) {
+    if (patrols.empty()) return;
+
+    BeamState start;
+    start.spotUse.assign(g_spots.size(), 0);
+    start.lifetimeBrands = g_collectedBrands;
+
+    vector<int> sourcePositions;
+    for (int idx : patrols) {
+        BeamAgent ag;
+        ag.pos = draft[idx].start;
+        ag.fuel = draft[idx].startFuel;
+        sourcePositions.push_back(ag.pos);
+        start.agents.push_back(ag);
+        if (steps > 0) {
+            int si = spotIndexAt(ag.pos);
+            if (si >= 0) {
+                int localIdx = (int)start.agents.size() - 1;
+                if (recordBeamVisit(si, start, localIdx, nullptr)) {
+                    start.agents[localIdx].cmds.push_back(-1);
+                    start.agents[localIdx].used = 1;
+                    start.usedStepsTotal++;
+                }
+            }
+        }
+    }
+
+    map<pair<int,int>, Route> routeCache = buildRouteCache(sourcePositions, status, steps);
+    vector<BeamState> beam(1, start);
+    BeamState best = start;
+
+    int patrolN = (int)patrols.size();
+    int stockSlots = 0;
+    for (const Spot& sp : g_spots) stockSlots += min(max(1, sp.stocks), patrolN);
+    int maxDepth = min(stockSlots, max(10, steps * max(1, patrolN) / 2));
+    maxDepth = min(maxDepth, W * H >= 400 ? 64 : 90);
+    int beamWidth = W * H >= 400 ? 72 : 120;
+    int branchLimit = W * H >= 400 ? 10 : 16;
+    if (g_fuelMode == FUEL_LOW) {
+        beamWidth = min(beamWidth, 64);
+        branchLimit = min(branchLimit, 10);
+    }
+
+    for (int depth = 0; depth < maxDepth; depth++) {
+        vector<BeamState> next;
+        for (const BeamState& st : beam) {
+            vector<BeamExpansion> cand;
+            for (int ai = 0; ai < patrolN; ai++) {
+                const BeamAgent& ag = st.agents[ai];
+                int reserve = shouldReserveRefuelStep(ag.fuel, steps - ag.used) ? 1 : 0;
+                int routeBudget = steps - ag.used - reserve;
+                if (routeBudget < 0) continue;
+
+                for (size_t si = 0; si < g_spots.size(); si++) {
+                    if (ag.seenSpots.count((int)si)) continue;
+                    if (st.spotUse[si] >= max(1, g_spots[si].stocks)) continue;
+
+                    Route route;
+                    auto it = routeCache.find(make_pair(ag.pos, g_spots[si].pos));
+                    if (it != routeCache.end()) route = it->second;
+                    if (!route.ok || route.steps > routeBudget || route.fuel > ag.fuel) {
+                        if (g_fuelMode != FUEL_LOW) continue;
+                        route = dijkstraRoute(ag.pos, g_spots[si].pos, status, routeBudget, ag.fuel);
+                    }
+                    if (!route.ok || route.steps > routeBudget || route.fuel > ag.fuel) continue;
+                    if (route.steps == 0 && ag.used >= steps) continue;
+
+                    BeamGain gain = measureBeamRoute(st, ai, route);
+                    if (gain.portions <= 0) continue;
+
+                    BeamExpansion ex;
+                    ex.agent = ai;
+                    ex.route = route;
+                    ex.gain = gain;
+                    ex.score = beamExpansionScore(st, route, gain);
+                    cand.push_back(ex);
+                }
+            }
+
+            sort(cand.begin(), cand.end(), [](const BeamExpansion& a, const BeamExpansion& b) {
+                if (a.score != b.score) return a.score > b.score;
+                if (a.gain.portions != b.gain.portions) return a.gain.portions > b.gain.portions;
+                return a.route.steps < b.route.steps;
+            });
+            if ((int)cand.size() > branchLimit) cand.resize(branchLimit);
+
+            for (const BeamExpansion& ex : cand) {
+                BeamState ns = st;
+                applyBeamRoute(ns, ex.agent, ex.route, steps);
+                next.push_back(ns);
+            }
+        }
+
+        if (next.empty()) break;
+        sort(next.begin(), next.end(), [](const BeamState& a, const BeamState& b) {
+            long long as = beamScore(a), bs = beamScore(b);
+            if (as != bs) return as > bs;
+            return a.usedStepsTotal < b.usedStepsTotal;
+        });
+        if ((int)next.size() > beamWidth) next.resize(beamWidth);
+        beam.swap(next);
+        if (beamScore(beam[0]) > beamScore(best)) best = beam[0];
+    }
+
+    for (int ai = 0; ai < patrolN; ai++) {
+        int idx = patrols[ai];
+        const BeamAgent& ag = best.agents[ai];
+        plan[idx] = ag.cmds;
+        if (ag.used < steps) plan[idx].push_back(-(steps - ag.used));
+        if (plan[idx].empty() && steps > 0) plan[idx].push_back(-steps);
+        draft[idx].end = ag.pos;
+        draft[idx].usedSteps = ag.used;
+        draft[idx].fuelLeft = ag.fuel;
+    }
+}
+
 static vector<vector<int>> buildSplitRefuelPlan(const mj::Value& state, const map<int,int>& status, int steps) {
     const mj::Value& ags = state["agents"];
     vector<vector<int>> plan(ags.size());
     vector<AgentDraft> draft(ags.size());
     vector<int> patrols, supplies;
-    map<int,int> spotUseToday;
-    set<int> lifetimeBrands = g_collectedBrands;
-    set<int> dailyBrands;
-
     for (size_t i = 0; i < ags.size(); i++) {
         int kind = ags[i]["kind"].asInt();
         int cur = ags[i]["pos"].asInt();
@@ -343,103 +630,7 @@ static vector<vector<int>> buildSplitRefuelPlan(const mj::Value& state, const ma
         else supplies.push_back((int)i);
     }
 
-    vector<int> patrolAnchors;
-
-    for (int idx : patrols) {
-        int cur = draft[idx].start;
-        int fuel = draft[idx].startFuel;
-        int used = 0;
-        int anchor = -1;
-        int patrolReserve = shouldReserveRefuelStep(fuel, steps) ? 1 : 0;
-        set<int> visitedSpotsByThisAgent;
-
-        if (spotAt(cur) && used < steps) {
-            plan[idx].push_back(-1);
-            used++;
-            recordVisit(cur, visitedSpotsByThisAgent, spotUseToday, lifetimeBrands, dailyBrands, nullptr);
-            anchor = cur;
-        }
-
-        while (used + patrolReserve < steps) {
-            int bestSpot = -1;
-            int bestScore = numeric_limits<int>::min();
-            Route bestRoute;
-            int routeBudget = steps - used - patrolReserve;
-
-            for (size_t si = 0; si < g_spots.size(); si++) {
-                const Spot& sp = g_spots[si];
-                if (visitedSpotsByThisAgent.count(sp.pos)) continue;
-                int stockCap = max(1, sp.stocks);
-                if (spotUseToday[sp.pos] >= stockCap) continue;
-
-                Route r = dijkstraRoute(cur, sp.pos, status, routeBudget, fuel);
-                if (!r.ok) continue;
-
-                bool newLifetimeBrand = lifetimeBrands.count(sp.brand) == 0;
-                bool newDailyBrand = dailyBrands.count(sp.brand) == 0;
-                int remainingStock = stockCap - spotUseToday[sp.pos];
-                bool reusedSpotByTeam = spotUseToday[sp.pos] > 0;
-                bool allKnownBrands = g_totalBrands > 0 &&
-                                      (int)lifetimeBrands.size() >= g_totalBrands;
-                bool allDailyBrands = g_totalBrands > 0 &&
-                                      (int)dailyBrands.size() >= g_totalBrands;
-
-                int score = 60000; // moi slot stock con lai la mot phan udon that.
-                if (newLifetimeBrand) score += 1200000;
-                if (newDailyBrand) score += 260000;
-                if (allKnownBrands && allDailyBrands) score += 50000;
-                score += remainingStock * (reusedSpotByTeam ? 26000 : 14000);
-                score += min(stockCap, 8) * 5000;
-                if (reusedSpotByTeam) score += 45000;
-                score -= r.steps * (allDailyBrands ? 1600 : 750);
-                score -= r.fuel * 120;
-
-                if (!patrolAnchors.empty() && !reusedSpotByTeam) {
-                    int sep = numeric_limits<int>::max();
-                    for (int other : patrolAnchors) sep = min(sep, roughDistance(sp.pos, other));
-                    score += min(sep, max(W, H)) * 900;
-                    if (sep <= 2) score -= 18000;
-                    else if (sep <= 4) score -= 5000;
-                }
-
-                if (score > bestScore ||
-                    (score == bestScore && (bestSpot < 0 ||
-                     r.steps < bestRoute.steps ||
-                     (r.steps == bestRoute.steps && r.fuel < bestRoute.fuel)))) {
-                    bestScore = score;
-                    bestSpot = (int)si;
-                    bestRoute = r;
-                }
-            }
-
-            if (bestSpot < 0) break;
-
-            const Spot& sp = g_spots[bestSpot];
-            if (bestRoute.steps == 0 && used < steps) {
-                plan[idx].push_back(-1);
-                used += 1;
-            }
-            appendRouteCommands(plan[idx], bestRoute);
-            used += bestRoute.steps;
-            fuel -= bestRoute.fuel;
-            cur = sp.pos;
-
-            if (anchor < 0) anchor = sp.pos;
-            if (bestRoute.cells.empty()) {
-                recordVisit(cur, visitedSpotsByThisAgent, spotUseToday, lifetimeBrands, dailyBrands, nullptr);
-            } else {
-                for (int cell : bestRoute.cells)
-                    recordVisit(cell, visitedSpotsByThisAgent, spotUseToday, lifetimeBrands, dailyBrands, nullptr);
-            }
-        }
-
-        if (used < steps) plan[idx].push_back(-(steps - used));
-        if (plan[idx].empty() && steps > 0) plan[idx].push_back(-steps);
-        draft[idx].end = cur;
-        draft[idx].usedSteps = used;
-        draft[idx].fuelLeft = fuel;
-        patrolAnchors.push_back(anchor >= 0 ? anchor : cur);
-    }
+    planPatrolsWithBeam(patrols, status, steps, plan, draft);
 
     vector<int> served(ags.size(), 0);
     for (int idx : supplies) {
@@ -537,6 +728,7 @@ static string parseSetup(const mj::Value& m) {
     g_fuelLimit = m["fuelLimits"].asInt();
     g_nAgents = (int)m["agents"].size();
     // Uu tien xe tuan tra vi moi xe co the thu phan udon rieng theo stock/ngay.
+    g_fuelMode = classifyFuelMode();
     g_supplyCount = chooseSupplyCount();
     g_patrolCount = g_nAgents - g_supplyCount;
     ostringstream out; out << "[";
@@ -580,8 +772,9 @@ int main(int argc, char** argv) {
         if (r.status == 0 || r.status == 425 || r.status == 429) { sleepMs(POLL_MS); continue; }
         fprintf(stderr, "GET /setup -> HTTP %d (token sai / match khong hop le?)\n", r.status); return 1;
     }
-    fprintf(stderr, "nhan setup: %dx%d o, %zu diem, %d xe (%d tuan tra, %d tiep te)\n",
-            W, H, g_spots.size(), g_nAgents, g_patrolCount, g_supplyCount);
+    fprintf(stderr, "nhan setup: %dx%d o, %zu diem, %d xe (%d tuan tra, %d tiep te), fuel %d/%s\n",
+            W, H, g_spots.size(), g_nAgents, g_patrolCount, g_supplyCount,
+            g_fuelLimit, fuelModeName(g_fuelMode));
 
     // 2) ASSIGNMENT — gửi loại agent (cố định cả trận).
     for (;;) {
