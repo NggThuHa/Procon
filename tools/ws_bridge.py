@@ -20,11 +20,9 @@ Token đọc từ $MATCH_TOKEN hoặc $API_TOKEN, không nhận qua dòng lệnh
 Chỉ stdlib. Bind localhost.
 """
 import argparse
-import http.client
 import json
 import os
 import queue
-import ssl
 import sys
 import threading
 import time
@@ -44,11 +42,6 @@ _cv = threading.Condition()
 _acks = queue.Queue()
 _ws = None
 _ws_send_lock = threading.Lock()
-_upstream = None
-_upstream_port = None
-_match_id = None
-_token = None
-_plain = False
 
 
 def _classify(msg):
@@ -107,40 +100,6 @@ def _wait_ack(timeout):
         return _acks.get(timeout=timeout)
     except queue.Empty:
         return None
-
-
-def _post_assignment(payload):
-    """Gửi assignment qua REST; protocol WS chỉ nhận actions dạng ``[][]int``.
-
-    Nếu gửi mảng kind phẳng qua WS, judge cố giải mã từng số thành ``[]int`` và
-    trả ``json: cannot unmarshal number into Go value of type []int``.
-    """
-    body = json.dumps(payload, separators=(",", ":"))
-    headers = {
-        "Authorization": f"Bearer {_token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Connection": "close",
-    }
-    if _plain:
-        conn = http.client.HTTPConnection(_upstream, _upstream_port, timeout=30)
-    else:
-        conn = http.client.HTTPSConnection(
-            _upstream, _upstream_port, timeout=30,
-            context=ssl.create_default_context(),
-        )
-    try:
-        conn.request("POST", f"/api/v1/matches/{_match_id}/assignment",
-                     body=body, headers=headers)
-        response = conn.getresponse()
-        raw = response.read()
-        try:
-            result = json.loads(raw.decode()) if raw else {}
-        except (UnicodeDecodeError, ValueError):
-            result = {"valid": False, "reason": "response assignment khong phai JSON"}
-        return response.status, result
-    finally:
-        conn.close()
 
 
 class Bridge(BaseHTTPRequestHandler):
@@ -203,17 +162,6 @@ class Bridge(BaseHTTPRequestHandler):
         except ValueError:
             return self._send(400, {"valid": False, "reason": "JSON hong"})
 
-        if self.path.endswith("/assignment"):
-            try:
-                status, result = _post_assignment(payload)
-            except Exception as exc:
-                return self._send(502, {"valid": False,
-                                        "reason": f"gui assignment hong: {type(exc).__name__}"})
-            return self._send(status, result)
-
-        if not self.path.endswith("/actions"):
-            return self._send(404, {})
-
         with _ws_send_lock:
             try:
                 _ws.send_json(payload)
@@ -228,12 +176,10 @@ class Bridge(BaseHTTPRequestHandler):
 
 
 def main():
-    global _ws, _upstream, _upstream_port, _match_id, _token, _plain
+    global _ws
     ap = argparse.ArgumentParser()
     ap.add_argument("--match", required=True)
     ap.add_argument("--upstream", default="procon.ptit.edu.vn")
-    ap.add_argument("--upstream-port", type=int,
-                    help="mặc định 443, hoặc 80 khi dùng --plain")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8099)
     ap.add_argument("--plain", action="store_true", help="ws:// thay vì wss://")
@@ -245,15 +191,9 @@ def main():
     if not token:
         sys.exit("thiếu MATCH_TOKEN / API_TOKEN")
 
-    _upstream = args.upstream
-    _upstream_port = args.upstream_port or (80 if args.plain else 443)
-    _match_id = args.match
-    _token = token
-    _plain = args.plain
-
     path = f"/ws/v1/matches/{args.match}?token={token}"
     try:
-        _ws = WebSocket(args.upstream, path, port=_upstream_port,
+        _ws = WebSocket(args.upstream, path, port=80 if args.plain else 443,
                         tls=not args.plain)
     except WebSocketError as exc:
         sys.exit(f"không mở được WebSocket: {exc}")
