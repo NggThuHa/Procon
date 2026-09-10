@@ -7,7 +7,7 @@ LDLIBS   ?=
 .PHONY: all clean
 all: bot
 
-bot: main.cpp http.hpp minijson.hpp
+bot: main.cpp http.hpp minijson.hpp strategy/hungarian.hpp
 	$(CXX) $(CXXFLAGS) -o $@ main.cpp $(LDLIBS)
 
 clean:
