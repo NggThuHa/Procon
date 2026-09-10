@@ -762,14 +762,19 @@ int main(int argc, char** argv) {
     if (argc < 4) { fprintf(stderr, "dung: %s <URL> <MATCH_ID> <TOKEN>\n", argv[0]); return 2; }
     string base = string(argv[1]) + "/api/v1/matches/" + argv[2];
     string token = argv[3];
-    const int POLL_MS = 205; // >= 200ms, giam do tre nhan state moi
+    const int POLL_MS = 205;       // poll state khi trận đang chạy
+    const int SETUP_POLL_MS = 500; // tránh chuỗi 429 trước khi setup mở
+    const int RATE_LIMIT_MS = 1000;
 
     // 1) SETUP — chờ tới khi lấy được (425 = bản đồ chưa mở / trận chưa tới giờ).
     string assignBody;
     for (;;) {
         auto r = http::request(base, "GET", "/setup", token, "");
         if (r.status == 200) { auto v = mj::parse(r.body); assignBody = parseSetup(*v); break; }
-        if (r.status == 0 || r.status == 425 || r.status == 429) { sleepMs(POLL_MS); continue; }
+        if (r.status == 0 || r.status == 425 || r.status == 429) {
+            sleepMs(r.status == 429 ? RATE_LIMIT_MS : SETUP_POLL_MS);
+            continue;
+        }
         fprintf(stderr, "GET /setup -> HTTP %d (token sai / match khong hop le?)\n", r.status); return 1;
     }
     fprintf(stderr, "nhan setup: %dx%d o, %zu diem, %d xe (%d tuan tra, %d tiep te), fuel %d/%s\n",
@@ -786,18 +791,35 @@ int main(int argc, char** argv) {
                     reason.empty() ? "" : ": ", reason.c_str());
             return 1;
         }
-        if (r.status == 0 || r.status == 429) { sleepMs(POLL_MS); continue; }
+        if (r.status == 429) {
+            sleepMs(RATE_LIMIT_MS);
+            continue;
+        }
+        if (r.status == 0) {
+            fprintf(stderr, "POST /assignment mat ket noi; khong retry mu vi co the server da nhan\n");
+            return 1;
+        }
         fprintf(stderr, "POST /assignment -> HTTP %d\n", r.status); return 1;
     }
 
     // 3) VÒNG NGÀY — poll /state; mỗi ngày mới gửi kế hoạch. Hết trận -> /result trả 200.
     int lastDay = -1;
+    int uncertainDay = -1;
     for (;;) {
         auto r = http::request(base, "GET", "/state", token, "");
         if (r.status == 200) {
             auto v = mj::parse(r.body);
             int day = (*v)["day"].asInt();
-            if (day != lastDay) {
+            if (uncertainDay >= 0 && day != uncertainDay) {
+                // State đã sang ngày mới: submission không có ACK trước đó đã
+                // được server xử lý. Chỉ lúc này mới commit trace cục bộ.
+                commitPendingTrace(uncertainDay);
+                lastDay = uncertainDay;
+                fprintf(stderr, "ngay %d: state moi xac nhan submission truoc da duoc xu ly\n",
+                        uncertainDay);
+                uncertainDay = -1;
+            }
+            if (day != lastDay && day != uncertainDay) {
                 string acts = planActions(*v);
                 auto pr = http::request(base, "POST", "/actions", token, acts);
                 string reason;
@@ -808,14 +830,20 @@ int main(int argc, char** argv) {
                 } else if (pr.status == 200) {
                     fprintf(stderr, "ngay %d: server tu choi action%s%s\n",
                             day, reason.empty() ? "" : ": ", reason.c_str());
+                } else if (pr.status == 0 || pr.status == 502 || pr.status == 504) {
+                    // Timeout/mất kết nối không chứng minh POST chưa được nhận.
+                    // Giữ polling state nhưng tuyệt đối không gửi lại cùng ngày.
+                    uncertainDay = day;
+                    fprintf(stderr, "ngay %d: khong ro server da nhan action; "
+                                    "khong retry mu, cho state moi\n", day);
                 }
-                // 429/lỗi: giữ lastDay để vòng sau gửi lại.
+                // 429 chắc chắn bị rate-limit nên có thể lập lại từ state mới.
             }
         } else if (r.status != 429 && r.status != 0) {
             auto rr = http::request(base, "GET", "/result", token, "");
             if (rr.status == 200) { fprintf(stderr, "ket thuc tran\n"); break; }
         }
-        sleepMs(POLL_MS);
+        sleepMs(r.status == 429 ? RATE_LIMIT_MS : POLL_MS);
     }
     return 0;
 }

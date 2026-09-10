@@ -79,7 +79,26 @@ if [[ "$BASE" == https://* ]]; then
   printf 'Starting TLS proxy: http://%s:%s -> https://%s\n' "$PROXY_HOST" "$PROXY_PORT" "$UPSTREAM"
   python3 -m tools.tls_proxy --upstream "$UPSTREAM" --host "$PROXY_HOST" --port "$PROXY_PORT" &
   PROXY_PID="$!"
-  sleep 0.4
+
+  # Chỉ chạy bot sau khi đúng tiến trình proxy đã mở cổng. Tránh hai lỗi khó
+  # thấy: proxy chết vì cổng bị chiếm, hoặc bot khởi động trước proxy.
+  proxy_ready=0
+  for _ in $(seq 50); do
+    if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+      printf 'ERROR: TLS proxy stopped during startup\n' >&2
+      exit 1
+    fi
+    if (exec 3<>"/dev/tcp/${PROXY_HOST}/${PROXY_PORT}") 2>/dev/null; then
+      exec 3>&-
+      proxy_ready=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$proxy_ready" -ne 1 ]]; then
+    printf 'ERROR: TLS proxy did not open %s:%s\n' "$PROXY_HOST" "$PROXY_PORT" >&2
+    exit 1
+  fi
   BOT_URL="http://${PROXY_HOST}:${PROXY_PORT}"
 fi
 
