@@ -81,7 +81,7 @@ Mỗi chiến thuật một nhánh, một release. Quy ước ở
 | Câu hỏi trả lời | *Đi đâu thì đáng?* | *Đi thế nào cho kịp?* |
 | Chiến thuật | Bậc 2, 4 của thang | Bậc 1, 3, 5 của thang |
 | Mạnh ở dạng đề | Trận ngắn, ngân sách bước chặt, spot rải rác | Trận dài, nhiên liệu chặt, cần xe tiếp tế |
-| Nhánh đầu | `strategy/hungarian` | `strategy/dijkstra` |
+| Nhánh đầu | `strategy/beam-search` | `strategy/dijkstra` |
 | File | [`docs/plan/KIENNT.md`](plan/KIENNT.md) | [`docs/plan/DATNT.md`](plan/DATNT.md) |
 
 ### Rủi ro của cách chia này, và cách chặn

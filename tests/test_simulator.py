@@ -13,6 +13,7 @@ from tools.errors import (
     E_STEP_OVERFLOW,
     MatchError,
 )
+from tools.rules import TERRAIN_POND, neighbor
 from tools.simulator import Simulator
 
 FIXTURE = "fixtures/default.json"
@@ -143,6 +144,42 @@ class TestScoring(unittest.TestCase):
         s.positions[0] = s.spots[0]["pos"]
         s.step([[-32]] * 4)
         self.assertEqual(s.score()["udon_total"], 0)
+
+    def test_one_agent_collects_several_spots_in_a_day(self):
+        """m-11542: team-B thu 59 phần với TỐI ĐA 4 xe trong 4 ngày.
+
+        Trần của luật "chỉ thu ở ô dừng" là 4×4 = 16 < 59, nên một xe phải thu
+        được nhiều spot trong cùng một ngày. Test này ghim luật đó lại: nếu ai
+        đó thu hẹp `_collect` về ô dừng, arena sẽ lại chấm theo mục tiêu sai và
+        bot sẽ được tối ưu nhầm hướng.
+        """
+        s = sim(kinds=(0, 0, 0, 0))
+        # Fixture thật không có sẵn hai spot kề nhau, nên dời spot thứ hai sang
+        # ô kề spot thứ nhất để dựng đúng tình huống một xe ghé hai spot/ngày.
+        first = s.spots[0]
+        direction = next(
+            d for d in range(6)
+            if (n := neighbor(first["pos"], d, s.width, s.height)) is not None
+            and s.cells[n] != TERRAIN_POND
+        )
+        second = next(sp for sp in s.spots[1:] if sp["brand"] != first["brand"])
+        second["pos"] = neighbor(first["pos"], direction, s.width, s.height)
+
+        s.positions[0] = first["pos"]
+        s.step([[direction], [-32], [-32], [-32]])
+        score = s.score()
+        self.assertEqual(score["udon_total"], 2, "phải thu cả spot xuất phát và spot đi tới")
+        self.assertEqual(score["udon_types"], 2)
+
+    def test_stocks_cap_shared_across_agents_in_a_day(self):
+        """Tồn kho một spot giới hạn số phần cả đội lấy được ở đó trong ngày."""
+        s = sim(kinds=(0, 0, 0, 0))
+        spot = s.spots[0]
+        spot["stocks"] = 1
+        for i in range(4):
+            s.positions[i] = spot["pos"]
+        s.step([[-32]] * 4)
+        self.assertEqual(s.score()["udon_total"], 1, "stocks=1 thì 4 xe cũng chỉ được 1 phần")
 
     def test_better_follows_priority_order(self):
         low = {"udon_types": 1, "daily_types_sum": 99, "udon_total": 99}

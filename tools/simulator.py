@@ -180,36 +180,54 @@ class Simulator:
     def step(self, payload):
         """Validate rồi áp dụng một ngày. Trả về plan của từng agent."""
         plans = self.validate(payload)
+        starts = list(self.positions)
         for i, plan in enumerate(plans):
             self.positions[i] = plan["end"]
             if self.fuel[i] is not None:
                 self.fuel[i] -= plan["fuel_used"]
         self.visited.append([list(p["path"]) for p in plans])
-        self._collect()
+        self._collect(starts)
         self.types_by_day.append(len(self.collected))
         self.day += 1
         return plans
 
-    def _collect(self):
-        """Thu udon cuối ngày.
+    def _collect(self, starts):
+        """Thu udon cuối ngày, theo ĐƯỜNG ĐI chứ không chỉ ô dừng.
 
-        `[observed]` m-11542: một xe tuần tra đi vào spot `pos 0` (brand 0,
-        stocks 3) ngày 0 rồi ĐỨNG YÊN ngày 1-3. Kết quả udon_total = 4, tức
-        thu 1 phần MỖI NGÀY kể cả khi không di chuyển, và 4 > stocks ban đầu
-        nên tồn kho có nạp lại.
+        `[observed]` m-11542, hai bằng chứng phải khớp cùng lúc:
 
-        `[chưa xác minh]` Đi NGANG qua spot rồi dừng chỗ khác có thu không, và
-        một xe có thu được nhiều spot trong một ngày không. Ở đây dùng luật hẹp
-        nhất khớp với bằng chứng: thu tại ô xe DỪNG cuối ngày.
+        - team-A: một xe đi vào spot `pos 0` (brand 0, stocks 3) ngày 0 rồi
+          ĐỨNG YÊN ngày 1-3 → `udon_total = 4`. Vậy thu 1 phần MỖI NGÀY kể cả
+          khi không di chuyển, và 4 > stocks ban đầu nên tồn kho nạp lại đầu ngày.
+        - team-B: `udon_total = 59` với TỐI ĐA 4 xe tuần tra trong 4 ngày. Luật
+          "chỉ thu ở ô dừng" trần là 4×4 = 16 < 59, nên luật đó SAI. Một xe phải
+          thu được nhiều spot trong cùng một ngày.
+
+        Luật hẹp nhất khớp cả hai: mỗi xe tuần tra thu ở MỌI spot khác nhau nằm
+        trên đường đi của nó trong ngày (kể cả ô xuất phát), mỗi spot giới hạn
+        `stocks` phần một ngày dùng chung cho cả đội, nạp lại đầu ngày.
+
+        `[chưa xác minh]` Trần `stocks` dùng chung có đúng không, và stock của
+        đội bạn có độc lập không. Cả hai chỉ ảnh hưởng khi nhiều xe dồn một spot.
         """
+        by_pos = {}
+        for spot in self.spots:
+            by_pos.setdefault(spot["pos"], spot)
+
+        used = {}  # pos -> số phần cả đội đã lấy ở spot đó trong ngày
         for i, kind in enumerate(self.kinds):
             if kind != KIND_PATROL:
                 continue
-            spot = next((s for s in self.spots if s["pos"] == self.positions[i]), None)
-            if spot is None:
-                continue
-            brand = spot["brand"]
-            self.collected[brand] = self.collected.get(brand, 0) + 1
+            seen = set()
+            for cell in [starts[i]] + self.visited[-1][i]:
+                spot = by_pos.get(cell)
+                if spot is None or cell in seen:
+                    continue
+                if used.get(cell, 0) >= max(1, spot["stocks"]):
+                    continue
+                seen.add(cell)
+                used[cell] = used.get(cell, 0) + 1
+                self.collected[spot["brand"]] = self.collected.get(spot["brand"], 0) + 1
 
     def score(self):
         """Điểm theo đúng bốn chỉ số của `standings`, xếp theo thứ tự ưu tiên.

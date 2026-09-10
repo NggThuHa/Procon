@@ -4,6 +4,7 @@
 #include <chrono>
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <map>
 #include <queue>
@@ -14,12 +15,7 @@
 #include <vector>
 #include "minijson.hpp"
 #include "http.hpp"
-#include "strategy/hungarian.hpp"
 using namespace std;
-
-static strategy::Setup g_setup;
-static strategy::State g_history;
-static int g_nAgents;
 
 struct Spot {
     int brand = 0;
@@ -55,21 +51,44 @@ enum FuelMode {
     FUEL_HIGH
 };
 
+// Ngan sach thoi gian cho mot ngay. Truoc day beam chay den het maxDepth bat ke
+// dong ho, tren map du lon la vuot daySeconds va mat trang mot ngay.
+static chrono::steady_clock::time_point g_planDeadline;
+static bool g_planDeadlineSet = false;
+
+static bool planTimeUp() {
+    return g_planDeadlineSet && chrono::steady_clock::now() >= g_planDeadline;
+}
+
+static int envInt(const char* name, int fallback) {
+    const char* raw = getenv(name);
+    if (!raw || !*raw) return fallback;
+    char* end = nullptr;
+    long v = strtol(raw, &end, 10);
+    if (end == raw || v < 0 || v > (1 << 30)) return fallback;
+    return (int)v;
+}
+
 static int W, H, g_nAgents;
 static vector<int> g_cells;    // phẳng row*W+col (0 đất,1 đường,2 núi,3 ao)
 static vector<Spot> g_spots;   // các điểm udon: brand/pos/stocks
+static vector<int> g_spotAt;   // pos -> chỉ số spot, -1 nếu ô không có spot
 static vector<int> g_daySteps; // số bước mỗi ngày
+static vector<int> g_daySeconds; // giây được phép trả lời mỗi ngày
 static int g_fuelLimit = 0;
 static int g_patrolCount = 0;
 static int g_supplyCount = 0;
 static int g_totalBrands = 0;
+static int g_daysLeft = 1;     // so ngay con lai ke ca ngay dang lap ke hoach
 static FuelMode g_fuelMode = FUEL_MEDIUM;
 static set<int> g_collectedBrands;
 static PendingTrace g_pendingTrace;
 
 static int neighbor(int pos, int d) {
-    if (W <= 0) return -1;
+    if (W <= 0 || d < 0 || d >= 6) return -1;
     int r = pos / W, c = pos % W;
+    static constexpr int DE[6][2] = {{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 0}};
+    static constexpr int DO[6][2] = {{-1, -1}, {0, -1}, {1, 0}, {0, 1}, {-1, 1}, {-1, 0}};
     const int (*dl)[2] = (r % 2) ? DO : DE;
     int nc = c + dl[d][0], nr = r + dl[d][1];
     if (nc < 0 || nc >= W || nr < 0 || nr >= H) return -1;
@@ -84,43 +103,63 @@ static pair<int,int> moveCost(int pos, int status) { // Bảng 1 cố định; {
     }
     return {-1, -1};
 }
+// Duyet theo NHIEN LIEU truoc, buoc sau. Nhien lieu la ngan sach ca tran con
+// buoc chi la ngan sach mot ngay: do tren fixture that, xe tieu het nhien lieu
+// khi con thua 1/3 so buoc. Duong di re buoc (1 buoc) nhung dat nhien lieu
+// (2 don vi), dat thi nguoc lai — toi thieu hoa buoc la chon dung cai dat thu
+// dang thieu.
 struct Node {
-    int steps;
     int fuel;
+    int steps;
     int pos;
 };
 struct NodeCmp {
     bool operator()(const Node& a, const Node& b) const {
-        if (a.steps != b.steps) return a.steps > b.steps;
-        return a.fuel > b.fuel;
+        if (a.fuel != b.fuel) return a.fuel > b.fuel;
+        return a.steps > b.steps;
     }
 };
 
-static Route dijkstraRoute(int src, int dst, const map<int,int>& status, int stepLimit, int fuelLimit) {
-    Route out;
+// Dijkstra tren khong gian (o, nhien lieu da dung). Chay MOT lan cho moi nguon,
+// khong dung som, roi dung lai duong toi bat ky dich nao — thay cho viec goi
+// lai ca ham cho tung cap (nguon, dich).
+struct DijkstraField {
+    bool ok = false;
+    int src = -1;
+    int stride = 0;
+    vector<int> dist, prevState, prevDir;
+    vector<int> bestAtPos;   // pos -> id trang thai tot nhat da chot, -1 neu chua toi
+};
+
+static DijkstraField dijkstraField(int src, const map<int,int>& status, int stepLimit, int fuelLimit) {
+    DijkstraField f;
     int n = (int)g_cells.size();
-    if (src < 0 || dst < 0 || src >= n || dst >= n || stepLimit < 0 || fuelLimit < 0) return out;
-    if (g_cells[src] == 3 || g_cells[dst] == 3) return out;
-    if (src == dst) { out.ok = true; return out; }
+    if (src < 0 || src >= n || stepLimit < 0 || fuelLimit < 0) return f;
+    if (g_cells[src] == 3) return f;
 
     const int INF = numeric_limits<int>::max() / 4;
-    int maxFuel = min(fuelLimit, max(0, stepLimit) * 2);
-    int stride = maxFuel + 1;
-    int total = n * stride;
-    vector<int> dist(total, INF), prevState(total, -1), prevDir(total, -1);
-    priority_queue<Node, vector<Node>, NodeCmp> pq;
+    // Chieu trang thai la SO BUOC da dung; khoang cach Dijkstra la nhien lieu.
+    f.ok = true;
+    f.src = src;
+    f.stride = stepLimit + 1;
+    int total = n * f.stride;
+    f.dist.assign(total, INF);
+    f.prevState.assign(total, -1);
+    f.prevDir.assign(total, -1);
+    f.bestAtPos.assign(n, -1);
 
-    auto id = [stride](int pos, int fuel) { return pos * stride + fuel; };
-    int start = id(src, 0);
-    dist[start] = 0;
+    priority_queue<Node, vector<Node>, NodeCmp> pq;
+    int start = src * f.stride;
+    f.dist[start] = 0;
     pq.push({0, 0, src});
 
-    int goal = -1;
     while (!pq.empty()) {
         Node cur = pq.top(); pq.pop();
-        int curId = id(cur.pos, cur.fuel);
-        if (cur.steps != dist[curId]) continue;
-        if (cur.pos == dst) { goal = curId; break; }
+        int curId = cur.pos * f.stride + cur.steps;
+        if (cur.fuel != f.dist[curId]) continue;
+        // Dijkstra chot theo thu tu (fuel, steps) tang dan, nen lan chot dau
+        // tien tai mot o chinh la duong re nhien lieu nhat toi o do.
+        if (f.bestAtPos[cur.pos] < 0) f.bestAtPos[cur.pos] = curId;
 
         auto c = moveCost(cur.pos, status.count(cur.pos) ? status.at(cur.pos) : 0);
         if (c.first < 0) continue;
@@ -129,43 +168,58 @@ static Route dijkstraRoute(int src, int dst, const map<int,int>& status, int ste
             if (nb < 0 || g_cells[nb] == 3) continue;
             int ns = cur.steps + c.first;
             int nf = cur.fuel + c.second;
-            if (ns > stepLimit || nf > maxFuel) continue;
-            int nextId = id(nb, nf);
-            if (ns < dist[nextId]) {
-                dist[nextId] = ns;
-                prevState[nextId] = curId;
-                prevDir[nextId] = d;
-                pq.push({ns, nf, nb});
+            if (ns > stepLimit || nf > fuelLimit) continue;
+            int nextId = nb * f.stride + ns;
+            if (nf < f.dist[nextId]) {
+                f.dist[nextId] = nf;
+                f.prevState[nextId] = curId;
+                f.prevDir[nextId] = d;
+                pq.push({nf, ns, nb});
             }
         }
     }
+    return f;
+}
 
+static Route routeFromField(const DijkstraField& f, int dst) {
+    Route out;
+    if (!f.ok || dst < 0 || dst >= (int)f.bestAtPos.size()) return out;
+    if (dst == f.src) { out.ok = true; return out; }
+    int goal = f.bestAtPos[dst];
     if (goal < 0) return out;
+
+    int start = f.src * f.stride;
     vector<int> dirs;
-    for (int at = goal; at != start; at = prevState[at]) dirs.push_back(prevDir[at]);
+    for (int at = goal; at != start; at = f.prevState[at]) dirs.push_back(f.prevDir[at]);
     reverse(dirs.begin(), dirs.end());
 
-    int cur = src;
+    int cur = f.src;
     for (int d : dirs) {
         cur = neighbor(cur, d);
         out.cells.push_back(cur);
     }
     out.ok = true;
     out.dirs = dirs;
-    out.steps = dist[goal];
-    out.fuel = goal % stride;
+    out.steps = goal % f.stride;
+    out.fuel = f.dist[goal];
     return out;
 }
 
-static const Spot* spotAt(int pos) {
-    for (const auto& sp : g_spots) if (sp.pos == pos) return &sp;
-    return nullptr;
+static Route dijkstraRoute(int src, int dst, const map<int,int>& status, int stepLimit, int fuelLimit) {
+    if (src == dst) { Route out; out.ok = (src >= 0 && src < (int)g_cells.size()); return out; }
+    return routeFromField(dijkstraField(src, status, stepLimit, fuelLimit), dst);
 }
 
+// Tra spot theo ô bằng bảng phẳng: hai ham nay nam trong vong trong cua beam,
+// quet tuyen tinh o day tung la phan lon thoi gian tren map lon.
 static int spotIndexAt(int pos) {
-    for (size_t i = 0; i < g_spots.size(); i++)
-        if (g_spots[i].pos == pos) return (int)i;
-    return -1;
+    if (pos < 0 || pos >= (int)g_spotAt.size()) return -1;
+    return g_spotAt[pos];
+}
+
+static const Spot* spotAt(int pos) {
+    int idx = spotIndexAt(pos);
+    return idx < 0 ? nullptr : &g_spots[idx];
 }
 
 static bool recordVisit(int pos, set<int>& seenByAgent, map<int,int>& spotUseToday,
@@ -323,8 +377,25 @@ static const char* fuelModeName(FuelMode mode) {
     }
 }
 
+// Tong so buoc cua ca tran, khong phai cua mot ngay.
+static int totalDaySteps() {
+    int sum = 0;
+    for (int steps : g_daySteps) sum += steps;
+    return sum;
+}
+
 static int chooseSupplyCount() {
+    int forced = envInt("PROCON_SUPPLY", -1);
+    if (forced >= 0) return min(forced, max(0, g_nAgents - 1));
     if (g_nAgents <= 1) return 0;
+
+    // Xe tiep te KHONG thu udon, nen no chi dang gia khi nhien lieu that su la
+    // thu dang thieu. Di tren dat ton 1 nhien lieu cho 2 buoc, nen ca tran can
+    // nhieu nhat totalDaySteps()/2 nhien lieu neu dinh tuyen uu tien dat. Du
+    // chung do thi khong bao gio phai nap, va mot xe tuan tra nua co gia tri
+    // hon: do tren fixture that cua tran queue, 4 xe tuan tra an het 60/60 con
+    // 3 xe tuan tra + 1 tiep te chi duoc 59.
+    if (g_fuelLimit <= 0 || g_fuelLimit * 2 >= totalDaySteps()) return 0;
 
     if (g_fuelMode != FUEL_LOW) return 1;
 
@@ -336,6 +407,20 @@ static int chooseSupplyCount() {
     return max(1, supply);
 }
 
+// `fuelLimits` la ngan sach cho CA TRAN chu khong phai moi ngay: tren map lon,
+// mot ngay 64 buoc toan duong (1 buoc = 2 nhien lieu) ngon tron 128 nhien lieu
+// cua ca tran. Neu tieu tham lam theo ngay thi hai ngay cuoi xe dung yen, va
+// dung yen la mat phan udon. Chia deu cho so ngay con lai, cho phep vuot mot
+// he so nho de con bam duoc cum spot o xa; ngay cuoi thi tieu het.
+static int fuelBudgetToday(int fuelLeft, int daysLeft) {
+    if (fuelLeft <= 0) return 0;
+    if (daysLeft <= 1) return fuelLeft;
+    int even = (fuelLeft + daysLeft - 1) / daysLeft;
+    int slack = envInt("PROCON_FUEL_SLACK", 100);   // phan tram cua phan chia deu
+    long long allowed = (long long)even * slack / 100;
+    return (int)min<long long>(fuelLeft, max<long long>(1, allowed));
+}
+
 static bool shouldReserveRefuelStep(int fuel, int steps) {
     if (g_supplyCount <= 0 || g_fuelLimit <= 0) return false;
     if (fuel <= max(2, g_fuelLimit / 3)) return true;
@@ -344,7 +429,8 @@ static bool shouldReserveRefuelStep(int fuel, int steps) {
 
 struct BeamAgent {
     int pos = 0;
-    int fuel = 0;
+    int fuel = 0;        // nhien lieu con lai cho CA TRAN
+    int fuelToday = 0;   // phan duoc phep tieu trong ngay hom nay
     int used = 0;
     vector<int> cmds;
     set<int> seenSpots;
@@ -358,6 +444,7 @@ struct BeamState {
     int portions = 0;
     int usedStepsTotal = 0;
     int fuelUsed = 0;
+    long long score = 0;   // beamScore(*this), tinh mot lan khi state thay doi
 };
 
 struct BeamGain {
@@ -471,9 +558,11 @@ static map<pair<int,int>, Route> buildRouteCache(const vector<int>& sourcePositi
 
     map<pair<int,int>, Route> cache;
     int fuelCap = g_fuelLimit > 0 ? g_fuelLimit : max(1, steps * 2);
-    for (int src : sources)
+    for (int src : sources) {
+        DijkstraField f = dijkstraField(src, status, steps, fuelCap);
         for (const Spot& sp : g_spots)
-            cache[make_pair(src, sp.pos)] = dijkstraRoute(src, sp.pos, status, steps, fuelCap);
+            cache[make_pair(src, sp.pos)] = routeFromField(f, sp.pos);
+    }
     return cache;
 }
 
@@ -485,6 +574,7 @@ static void applyBeamRoute(BeamState& st, int agentIdx, const Route& route, int 
             ag.used++;
             st.usedStepsTotal++;
             recordBeamVisit(spotIndexAt(ag.pos), st, agentIdx, nullptr);
+            st.score = beamScore(st);
         }
         return;
     }
@@ -492,10 +582,12 @@ static void applyBeamRoute(BeamState& st, int agentIdx, const Route& route, int 
     appendRouteCommands(ag.cmds, route);
     ag.used += route.steps;
     ag.fuel -= route.fuel;
+    ag.fuelToday -= route.fuel;
     st.usedStepsTotal += route.steps;
     st.fuelUsed += route.fuel;
     for (int cell : route.cells) recordBeamVisit(spotIndexAt(cell), st, agentIdx, nullptr);
     if (!route.cells.empty()) ag.pos = route.cells.back();
+    st.score = beamScore(st);
 }
 
 static void planPatrolsWithBeam(const vector<int>& patrols, const map<int,int>& status, int steps,
@@ -511,6 +603,7 @@ static void planPatrolsWithBeam(const vector<int>& patrols, const map<int,int>& 
         BeamAgent ag;
         ag.pos = draft[idx].start;
         ag.fuel = draft[idx].startFuel;
+        ag.fuelToday = fuelBudgetToday(ag.fuel, g_daysLeft);
         sourcePositions.push_back(ag.pos);
         start.agents.push_back(ag);
         if (steps > 0) {
@@ -526,6 +619,7 @@ static void planPatrolsWithBeam(const vector<int>& patrols, const map<int,int>& 
         }
     }
 
+    start.score = beamScore(start);
     map<pair<int,int>, Route> routeCache = buildRouteCache(sourcePositions, status, steps);
     vector<BeamState> beam(1, start);
     BeamState best = start;
@@ -534,15 +628,25 @@ static void planPatrolsWithBeam(const vector<int>& patrols, const map<int,int>& 
     int stockSlots = 0;
     for (const Spot& sp : g_spots) stockSlots += min(max(1, sp.stocks), patrolN);
     int maxDepth = min(stockSlots, max(10, steps * max(1, patrolN) / 2));
-    maxDepth = min(maxDepth, W * H >= 400 ? 64 : 90);
-    int beamWidth = W * H >= 400 ? 72 : 120;
-    int branchLimit = W * H >= 400 ? 10 : 16;
+    maxDepth = min(maxDepth, envInt("PROCON_BEAM_DEPTH", W * H >= 400 ? 64 : 90));
+    // Dijkstra mot-nguon-nhieu-dich lam moi tang beam re di nhieu lan, nen map
+    // lon gio chay duoc beam rong bang map nho thay vi bi cat con mot nua.
+    int beamWidth = max(1, envInt("PROCON_BEAM_WIDTH", 144));
+    int branchLimit = max(1, envInt("PROCON_BEAM_BRANCH", 16));
     if (g_fuelMode == FUEL_LOW) {
         beamWidth = min(beamWidth, 64);
         branchLimit = min(branchLimit, 10);
     }
 
+    // Moi tang beam chi giao duong cho MOT xe, nen phai chay it nhat patrolN
+    // tang thi ca doi moi co viec lam. Cat som hon la tra ve ke hoach dung yen
+    // — dung yen la mat phan udon, te hon ca mot ke hoach tham lam voi va.
+    int minDepth = min(maxDepth, patrolN);
+
     for (int depth = 0; depth < maxDepth; depth++) {
+        bool timeUp = planTimeUp();
+        if (timeUp && depth >= minDepth) break;
+        if (timeUp) { beamWidth = 1; branchLimit = 1; }  // het gio: ha ve tham lam
         vector<BeamState> next;
         for (const BeamState& st : beam) {
             vector<BeamExpansion> cand;
@@ -559,11 +663,11 @@ static void planPatrolsWithBeam(const vector<int>& patrols, const map<int,int>& 
                     Route route;
                     auto it = routeCache.find(make_pair(ag.pos, g_spots[si].pos));
                     if (it != routeCache.end()) route = it->second;
-                    if (!route.ok || route.steps > routeBudget || route.fuel > ag.fuel) {
+                    if (!route.ok || route.steps > routeBudget || route.fuel > ag.fuelToday) {
                         if (g_fuelMode != FUEL_LOW) continue;
-                        route = dijkstraRoute(ag.pos, g_spots[si].pos, status, routeBudget, ag.fuel);
+                        route = dijkstraRoute(ag.pos, g_spots[si].pos, status, routeBudget, ag.fuelToday);
                     }
-                    if (!route.ok || route.steps > routeBudget || route.fuel > ag.fuel) continue;
+                    if (!route.ok || route.steps > routeBudget || route.fuel > ag.fuelToday) continue;
                     if (route.steps == 0 && ag.used >= steps) continue;
 
                     BeamGain gain = measureBeamRoute(st, ai, route);
@@ -594,13 +698,12 @@ static void planPatrolsWithBeam(const vector<int>& patrols, const map<int,int>& 
 
         if (next.empty()) break;
         sort(next.begin(), next.end(), [](const BeamState& a, const BeamState& b) {
-            long long as = beamScore(a), bs = beamScore(b);
-            if (as != bs) return as > bs;
+            if (a.score != b.score) return a.score > b.score;
             return a.usedStepsTotal < b.usedStepsTotal;
         });
         if ((int)next.size() > beamWidth) next.resize(beamWidth);
         beam.swap(next);
-        if (beamScore(beam[0]) > beamScore(best)) best = beam[0];
+        if (beam[0].score > best.score) best = beam[0];
     }
 
     for (int ai = 0; ai < patrolN; ai++) {
@@ -722,9 +825,17 @@ static string parseSetup(const mj::Value& m) {
         g_spots.push_back(s);
         setupBrands.insert(s.brand);
     }
+    // Bang tra spot theo o; giu spot dau tien neu hai spot trung o.
+    g_spotAt.assign(g_cells.size(), -1);
+    for (size_t i = 0; i < g_spots.size(); i++) {
+        int p = g_spots[i].pos;
+        if (p >= 0 && p < (int)g_spotAt.size() && g_spotAt[p] < 0) g_spotAt[p] = (int)i;
+    }
     g_totalBrands = (int)setupBrands.size();
     g_daySteps.clear();
     for (size_t i = 0; i < m["daySteps"].size(); i++) g_daySteps.push_back(m["daySteps"][i].asInt());
+    g_daySeconds.clear();
+    for (size_t i = 0; i < m["daySeconds"].size(); i++) g_daySeconds.push_back(m["daySeconds"][i].asInt());
     g_fuelLimit = m["fuelLimits"].asInt();
     g_nAgents = (int)m["agents"].size();
     // Uu tien xe tuan tra vi moi xe co the thu phan udon rieng theo stock/ngay.
@@ -741,6 +852,17 @@ static string parseSetup(const mj::Value& m) {
 static string planActions(const mj::Value& m) {
     int day = m["day"].asInt();
     int steps = (day >= 0 && day < (int)g_daySteps.size()) ? g_daySteps[day] : 30;
+
+    // Ngan sach suy nghi. response_ms_total la tieu chi xep hang thu 4, DUOI
+    // udon_total, nen doi them thoi gian lay them phan udon la co loi — nhung
+    // chi trong gioi han daySeconds, va chua mot bien an toan de con kip POST.
+    g_daysLeft = max(1, (int)g_daySteps.size() - max(0, day));
+
+    int daySec = (day >= 0 && day < (int)g_daySeconds.size()) ? g_daySeconds[day] : 0;
+    int budgetMs = envInt("PROCON_PLAN_MS", daySec > 0 ? max(1000, daySec * 1000 / 4) : 5000);
+    if (daySec > 0) budgetMs = min(budgetMs, daySec * 1000 - 2000);
+    g_planDeadline = chrono::steady_clock::now() + chrono::milliseconds(max(200, budgetMs));
+    g_planDeadlineSet = true;
     map<int,int> status;
     for (size_t i = 0; i < m["traffics"].size(); i++)
         status[m["traffics"][i]["pos"].asInt()] = m["traffics"][i]["status"].asInt();
@@ -754,17 +876,6 @@ static string planActions(const mj::Value& m) {
     }
     g_pendingTrace = tracePlan(plan, m, status);
     return renderPlan(plan);
-}
-
-static bool actionAccepted(const http::Response& response) {
-    if (response.status != 200) return false;
-    try {
-        auto body = mj::parse(response.body);
-        const mj::Value& valid = (*body)["valid"];
-        return valid.type == mj::Value::BOOL && valid.boolean;
-    } catch (...) {
-        return false;
-    }
 }
 
 static void sleepMs(int ms) { this_thread::sleep_for(chrono::milliseconds(ms)); }

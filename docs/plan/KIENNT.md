@@ -8,8 +8,7 @@ spot nào. DATNT trả lời "đi thế nào cho kịp".
 Ngoài ra sở hữu **công cụ đo** — simulator và arena — vì mọi quyết định chiến
 thuật của cả hai người đều phải được chấm bằng công cụ này.
 
-- Nhánh: `kien/strategy-greedy`
-- Chiến thuật sở hữu: `strategy/greedy_day.hpp`
+- Chiến thuật hiện tại: `planActions()` trong `hexudon-bot-cpp/main.cpp`
 - Luật: [`README.md`](../../README.md) · Phối hợp: [`PLAN.md`](../PLAN.md)
 
 > Vai trò cũ (mock server, API client, snapshot, retry) đã bị cắt. Lý do trong
@@ -74,19 +73,12 @@ Không phải "chiến thuật riêng của KIENNT đấu với chiến thuật 
 xây **một bot chung**, mỗi người sở hữu vài bậc trên thang ở
 [`strategies.md`](../strategies.md). Các bậc xếp chồng lên nhau, không thay thế nhau.
 
-### Bậc 2 — Gán Hungarian (`strategy/hungarian.hpp`)
+### Bậc 2 — Gán mục tiêu toàn cục
 
-Thay vì greedy chọn spot gần nhất cho từng xe, gán **xe ↔ spot tối ưu toàn cục**
-bằng thuật toán Hungary, `O(n³)`.
+Hungarian đã bỏ. `planActions()` hiện dùng beam search trực tiếp để phân bổ route
+cho các xe tuần tra, tránh phụ thuộc vào `strategy/hungarian.hpp`.
 
-- [ ] Ma trận chi phí: hàng là xe, cột là spot, ô là chi phí bước để tới nơi.
-- [ ] Giá trị mục tiêu trừ vào chi phí — cần luật chấm điểm từ Giai đoạn 0.
-- [ ] Xe không tới kịp spot nào thì gán chi phí vô cùng.
-
-Đây là bậc **ăn điểm nhiều nhất so với công bỏ ra**. Bot mẫu đang để hai xe tuần
-tra cùng chạy về `pos 16` — Hungarian xoá hẳn lớp lỗi đó.
-
-### Bậc 4 — Beam search (`strategy/beam_search.hpp`)
+### Bậc 4 — Beam search (`main.cpp`)
 
 Giữ `W` phương án tốt nhất ở mỗi độ sâu, mở rộng tiếp. Hợp với bài này vì ngân
 sách bước rời rạc.
@@ -101,14 +93,9 @@ Chỉ làm sau khi bậc 1–3 xong và có số đo.
 
 ## Giao diện
 
-```cpp
-// strategy/hungarian.hpp, strategy/beam_search.hpp
-Plan planHungarian(const Setup&, const State&);
-Plan planBeamSearch(const Setup&, const State&);
-```
-
-Dùng `strategy/common.hpp` của DATNT để tìm đường và validate. **Không tự viết
-hàm tìm đường riêng** — hai bản pathing lệch nhau là lỗi rất khó tìm.
+`planActions()` trong `main.cpp` đọc state mới nhất, lập beam plan, validate trước
+khi gửi. Phần tìm đường hiện vẫn nằm trong `main.cpp`; cần tách sang
+`strategy/common.hpp` khi DATNT hoàn tất nền chung.
 
 Mỗi bậc một nhánh, một release: xem
 [quy ước](../strategies.md#mỗi-chiến-thuật-một-nhánh-một-release).

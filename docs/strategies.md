@@ -104,16 +104,16 @@ Bậc 1–2 rẻ và thắng nhiều nhất. Đừng nhảy thẳng lên bậc 5
 
 | | Mẫu | Ví dụ |
 |---|---|---|
-| Nhánh | `strategy/<tên>` | `strategy/hungarian` |
-| Tag | `bot-<tên>-v<N>` | `bot-hungarian-v1` |
-| File | `strategy/<tên>.hpp` | `strategy/hungarian.hpp` |
+| Nhánh | `strategy/<tên>` | `strategy/beam-search` |
+| Tag | `bot-<tên>-v<N>` | `bot-beam-search-v1` |
+| File | `strategy/<tên>.hpp` | `main.cpp` |
 
 ```bash
-git switch -c strategy/hungarian
+git switch -c strategy/beam-search
 # ... code, đo bằng arena ...
-git push -u origin strategy/hungarian
-git tag bot-hungarian-v1
-git push origin bot-hungarian-v1     # -> workflow tự build và tạo release
+git push -u origin strategy/beam-search
+git tag bot-beam-search-v1
+git push origin bot-beam-search-v1     # -> workflow tự build và tạo release
 ```
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) sẽ build nhị
@@ -139,7 +139,7 @@ nó hơn hay kém bản trước.
 Định dạng tối thiểu của `docs/arena/<tên>.md`:
 
 ```markdown
-| Map | Điểm | So với `hungarian-v1` |
+| Map | Điểm | So với `bot-v1` |
 |---|---|---|
 | dense-road   | 42 | +6 |
 | tight-fuel   | 31 | -2 |
@@ -152,7 +152,7 @@ nó hơn hay kém bản trước.
 | Bậc | Nhánh | Tag đầu tiên | Chủ trì |
 |---:|---|---|---|
 | 1 | `strategy/dijkstra` | `bot-dijkstra-v1` | DATNT |
-| 2 | `strategy/hungarian` | `bot-hungarian-v1` | KIENNT |
+| 2 | `strategy/beam-search` | `bot-beam-search-v1` | KIENNT |
 | 3 | `strategy/rolling-horizon` | `bot-rolling-horizon-v1` | DATNT |
 | 4 | `strategy/beam-search` | `bot-beam-search-v1` | KIENNT |
 | 5 | `strategy/alns` | `bot-alns-v1` | DATNT |
