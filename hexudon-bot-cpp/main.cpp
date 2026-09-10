@@ -14,12 +14,12 @@
 #include <vector>
 #include "minijson.hpp"
 #include "http.hpp"
+#include "strategy/hungarian.hpp"
 using namespace std;
 
-// Hướng BTC gốc: 0 trên-trái,1 trên-phải,2 phải,3 dưới-phải,4 dưới-trái,5 trái.
-// Hình học EVEN-R (hàng CHẴN lệch phải — khớp BTC Q1). DE=hàng chẵn, DO=hàng lẻ.
-static const int DE[6][2] = {{0,-1},{1,-1},{1,0},{1,1},{0,1},{-1,0}};
-static const int DO[6][2] = {{-1,-1},{0,-1},{1,0},{0,1},{-1,1},{-1,0}};
+static strategy::Setup g_setup;
+static strategy::State g_history;
+static int g_nAgents;
 
 struct Spot {
     int brand = 0;
@@ -754,6 +754,17 @@ static string planActions(const mj::Value& m) {
     }
     g_pendingTrace = tracePlan(plan, m, status);
     return renderPlan(plan);
+}
+
+static bool actionAccepted(const http::Response& response) {
+    if (response.status != 200) return false;
+    try {
+        auto body = mj::parse(response.body);
+        const mj::Value& valid = (*body)["valid"];
+        return valid.type == mj::Value::BOOL && valid.boolean;
+    } catch (...) {
+        return false;
+    }
 }
 
 static void sleepMs(int ms) { this_thread::sleep_for(chrono::milliseconds(ms)); }
