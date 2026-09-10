@@ -46,6 +46,21 @@ def login():
     return _call("POST", "/auth/login", {"username": user, "password": pwd})["token"]
 
 
+def _match_state(token, match_id):
+    """Trạng thái thật của trận, hoặc None nếu chưa xuất hiện trong danh sách.
+
+    Trận vừa ghép có thể chưa kịp vào `/team/matches`; None nghĩa là "chưa biết,
+    coi như còn mới" chứ không phải "đã hỏng".
+    """
+    try:
+        for m in _call("GET", "/team/matches", token=token)["matches"]:
+            if m.get("id") == match_id:
+                return m.get("status")
+    except Exception:
+        return None
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--timeout", type=int, default=300,
@@ -56,6 +71,7 @@ def main():
     token = login()
     deadline = time.time() + args.timeout
     last = None
+    stale_warned = set()
     while time.time() < deadline:
         try:
             info = _call("POST", "/practice/queue", {}, token)
@@ -67,8 +83,22 @@ def main():
         if status != last:
             print(f"hàng chờ: {status}", file=sys.stderr)
             last = status
-        if info.get("match_id") and status == "matched":
-            print(info["match_id"])          # stdout: chỉ match id, cho caller
+
+        mid = info.get("match_id")
+        if mid and status == "matched":
+            # `matched` KHÔNG có nghĩa là trận còn vào được: endpoint giữ lại
+            # entry cũ sau khi trận đã chạy xong, và nối vào trận `done` thì
+            # WebSocket trả 401 còn HTTP trả E_STALE_DAY. Phải soi trạng thái
+            # thật trước khi bảo caller bật bot.
+            if _match_state(token, mid) in ("done", "cancelled"):
+                if mid not in stale_warned:
+                    print(f"bỏ qua {mid}: đã {_match_state(token, mid)} — "
+                          f"hàng chờ đang trả entry cũ, đợi trận mới",
+                          file=sys.stderr)
+                    stale_warned.add(mid)
+                time.sleep(args.poll)
+                continue
+            print(mid)                       # stdout: chỉ match id, cho caller
             return 0
         time.sleep(args.poll)
 

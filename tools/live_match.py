@@ -109,9 +109,12 @@ def main():
         print("CẢNH BÁO: bot mẫu không hỗ trợ TLS; dùng --bot-url qua tls_proxy",
               file=sys.stderr)
     print(f"chạy bot: {args.bot} -> {bot_url}")
+    # stderr đi thẳng ra terminal: bot in thời gian lập kế hoạch từng ngày, và
+    # đó là thứ duy nhất cho biết response_ms tốn ở đâu. Trước đây nó vào PIPE
+    # rồi không ai đọc — vừa mất thông tin vừa có nguy cơ đầy pipe làm bot treo.
     bot = subprocess.Popen(
         [args.bot, bot_url, mid, mtoken],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+        stdout=subprocess.DEVNULL, stderr=None, text=True,
     )
     try:
         final = wait_for_result(token, mid, args.timeout)

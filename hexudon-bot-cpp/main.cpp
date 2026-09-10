@@ -80,6 +80,7 @@ static int g_patrolCount = 0;
 static int g_supplyCount = 0;
 static int g_totalBrands = 0;
 static int g_daysLeft = 1;     // so ngay con lai ke ca ngay dang lap ke hoach
+static int g_lastPlanMs = 0;   // thoi gian lap ke hoach ngay vua roi
 static FuelMode g_fuelMode = FUEL_MEDIUM;
 static set<int> g_collectedBrands;
 static PendingTrace g_pendingTrace;
@@ -113,10 +114,20 @@ struct Node {
     int steps;
     int pos;
 };
+// Duyet theo tai nguyen dang THIEU truoc. Nhien lieu la ngan sach ca tran, buoc
+// la ngan sach mot ngay; tuy map ma cai nao can truoc. Bang chi phi lam hai
+// chieu nay nguoc nhau (duong: 1 buoc/2 nhien lieu, dat: 2 buoc/1 nhien lieu)
+// nen chon nham chieu la toi uu dung cai dang du.
+static bool g_routeByFuel = true;
+static bool g_fuelTight = true;
 struct NodeCmp {
     bool operator()(const Node& a, const Node& b) const {
-        if (a.fuel != b.fuel) return a.fuel > b.fuel;
-        return a.steps > b.steps;
+        if (g_routeByFuel) {
+            if (a.fuel != b.fuel) return a.fuel > b.fuel;
+            return a.steps > b.steps;
+        }
+        if (a.steps != b.steps) return a.steps > b.steps;
+        return a.fuel > b.fuel;
     }
 };
 
@@ -384,27 +395,49 @@ static int totalDaySteps() {
     return sum;
 }
 
+// Nhien lieu co phai thu dang thieu khong? Tra loi bang bang chi phi VA dia hinh
+// co that tren map, khong chot cung: dia hinh re nhien lieu nhat quyet dinh can
+// bao nhieu nhien lieu de tieu het ngan sach buoc cua ca tran.
+//   dat  {2 buoc, 1 nhien lieu} -> 0.50 nhien lieu/buoc
+//   nui  {3 buoc, 2 nhien lieu} -> 0.67
+//   duong{1 buoc, 2 nhien lieu} -> 2.00
+// Map toan duong can gap 4 lan nhien lieu so voi map toan dat cho cung so buoc.
+static bool computeFuelTight() {
+    static const int STEP_OF[3] = {2, 1, 3};
+    static const int FUEL_OF[3] = {1, 2, 2};
+    // Tinh theo TY LE dia hinh that tren map, khong theo dia hinh re nhat co
+    // mat: map 82% duong ma tinh theo 10% dat con lai thi uoc luong hut gan ba
+    // lan, va bot se dinh tuyen theo nhung thu no dang du.
+    long long fuelSum = 0, stepSum = 0;
+    for (int c : g_cells) {
+        if (c < 0 || c > 2) continue;
+        fuelSum += FUEL_OF[c];
+        stepSum += STEP_OF[c];
+    }
+    if (stepSum <= 0 || g_fuelLimit <= 0) return false;
+    // need = totalSteps * (fuelSum / stepSum), lam tron len.
+    long long need = ((long long)totalDaySteps() * fuelSum + stepSum - 1) / stepSum;
+    return g_fuelLimit < need;
+}
+
 static int chooseSupplyCount() {
     int forced = envInt("PROCON_SUPPLY", -1);
     if (forced >= 0) return min(forced, max(0, g_nAgents - 1));
     if (g_nAgents <= 1) return 0;
 
-    // Xe tiep te KHONG thu udon, nen no chi dang gia khi nhien lieu that su la
-    // thu dang thieu. Di tren dat ton 1 nhien lieu cho 2 buoc, nen ca tran can
-    // nhieu nhat totalDaySteps()/2 nhien lieu neu dinh tuyen uu tien dat. Du
-    // chung do thi khong bao gio phai nap, va mot xe tuan tra nua co gia tri
-    // hon: do tren fixture that cua tran queue, 4 xe tuan tra an het 60/60 con
-    // 3 xe tuan tra + 1 tiep te chi duoc 59.
-    if (g_fuelLimit <= 0 || g_fuelLimit * 2 >= totalDaySteps()) return 0;
-
-    if (g_fuelMode != FUEL_LOW) return 1;
-
-    int supply = 1;
-    if (g_nAgents >= 6) supply = 2;
-    if (g_nAgents >= 8) supply = 3;
-
-    supply = min(supply, g_nAgents - 1);
-    return max(1, supply);
+    // Mac dinh KHONG dung xe tiep te. Ly do, theo do manh yeu dan:
+    //   1. Xe tiep te khong bao gio thu udon — dieu nay chac chan.
+    //   2. Tren MOI map da do, bo no deu hon: fixture that cua tran queue an
+    //      tron 60/60 voi 4 xe tuan tra, con 3 tuan tra + 1 tiep te chi 59.
+    //   3. Khong co bang chung nao cho thay no co ich: arena khong mo phong
+    //      viec nap nhien lieu, va chua ai thu tren judge that.
+    // Diem 3 la mot lo hong that: neu judge that cho nap nhien lieu hieu qua
+    // thi tren map CUC thieu nhien lieu, xe tiep te co the dang gia. Chua do
+    // duoc thi khong doan — dat PROCON_SUPPLY=1 de thu tren tran that.
+    //
+    // Chu y: "thieu nhien lieu" theo nghia khong du de di het moi buoc moi ngay
+    // KHONG keo theo can xe tiep te. Chi can du de cham tran ton kho moi ngay.
+    return 0;
 }
 
 // `fuelLimits` la ngan sach cho CA TRAN chu khong phai moi ngay: tren map lon,
@@ -839,6 +872,10 @@ static string parseSetup(const mj::Value& m) {
     g_fuelLimit = m["fuelLimits"].asInt();
     g_nAgents = (int)m["agents"].size();
     // Uu tien xe tuan tra vi moi xe co the thu phan udon rieng theo stock/ngay.
+    g_fuelTight = computeFuelTight();
+    // Dinh tuyen theo tai nguyen dang thieu; PROCON_ROUTE_BY=1 ep theo nhien
+    // lieu, =0 ep theo buoc, khong dat thi tu chon.
+    g_routeByFuel = envInt("PROCON_ROUTE_BY", g_fuelTight ? 1 : 0) != 0;
     g_fuelMode = classifyFuelMode();
     g_supplyCount = chooseSupplyCount();
     g_patrolCount = g_nAgents - g_supplyCount;
@@ -850,6 +887,7 @@ static string parseSetup(const mj::Value& m) {
 
 // planActions: chia xe thu udon/cap nhien lieu, Dijkstra theo chi phi that, validate truoc khi gui.
 static string planActions(const mj::Value& m) {
+    auto planStart = chrono::steady_clock::now();
     int day = m["day"].asInt();
     int steps = (day >= 0 && day < (int)g_daySteps.size()) ? g_daySteps[day] : 30;
 
@@ -875,6 +913,8 @@ static string planActions(const mj::Value& m) {
         plan = waitPlan(ags.size(), steps);
     }
     g_pendingTrace = tracePlan(plan, m, status);
+    g_lastPlanMs = (int)chrono::duration_cast<chrono::milliseconds>(
+        chrono::steady_clock::now() - planStart).count();
     return renderPlan(plan);
 }
 
@@ -884,7 +924,19 @@ int main(int argc, char** argv) {
     if (argc < 4) { fprintf(stderr, "dung: %s <URL> <MATCH_ID> <TOKEN>\n", argv[0]); return 2; }
     string base = string(argv[1]) + "/api/v1/matches/" + argv[2];
     string token = argv[3];
-    const int POLL_MS = 205; // >= 200ms, giam do tre nhan state moi
+    const int POLL_MS = envInt("PROCON_POLL_MS", 205); // >= 200ms luc binh thuong
+    // Do tren fixture that: lap ke hoach chi ton 15-28 ms, nhung response_ms
+    // that la ~242 ms/ngay — gan het la nam cho POLL_MS. Ngay moi thuong toi
+    // ngay sau khi cac doi nop xong, nen bam sat trong mot cua ngan ke tu luc
+    // MINH nop, roi lui ve nhip thuong de khong bi 429.
+    const int BURST_MS = envInt("PROCON_BURST_MS", 40);
+    const int BURST_WINDOW_MS = envInt("PROCON_BURST_WINDOW_MS", 2000);
+    // Giua ngay thi khong co gi de doi: poll thua cho do ton request, de danh
+    // nhip nhanh cho dung hai luc ngay CO THE sang.
+    const int IDLE_MS = envInt("PROCON_IDLE_MS", 600);
+    auto lastSubmit = chrono::steady_clock::time_point::min();
+    auto dayFirstSeen = chrono::steady_clock::time_point::min();
+    int dayLenMs = 0;
 
     // 1) SETUP — chờ tới khi lấy được (425 = bản đồ chưa mở / trận chưa tới giờ).
     string assignBody;
@@ -897,6 +949,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "nhan setup: %dx%d o, %zu diem, %d xe (%d tuan tra, %d tiep te), fuel %d/%s\n",
             W, H, g_spots.size(), g_nAgents, g_patrolCount, g_supplyCount,
             g_fuelLimit, fuelModeName(g_fuelMode));
+    fprintf(stderr, "nhien lieu %s, dinh tuyen theo %s\n",
+            g_fuelTight ? "THIEU" : "du", g_routeByFuel ? "nhien lieu" : "buoc");
 
     // 2) ASSIGNMENT — gửi loại agent (cố định cả trận).
     for (;;) {
@@ -920,24 +974,50 @@ int main(int argc, char** argv) {
             auto v = mj::parse(r.body);
             int day = (*v)["day"].asInt();
             if (day != lastDay) {
+                // Moc thoi gian ngay theo dong ho CUA MINH: dung daySeconds
+                // chu khong dung `endsAt`, de khong phu thuoc dong ho may minh
+                // co lech voi server hay khong.
+                dayFirstSeen = chrono::steady_clock::now();
+                dayLenMs = (day >= 0 && day < (int)g_daySeconds.size())
+                           ? g_daySeconds[day] * 1000 : 0;
                 string acts = planActions(*v);
                 auto pr = http::request(base, "POST", "/actions", token, acts);
                 string reason;
                 if (actionAccepted(pr, &reason)) {
                     commitPendingTrace(day);
                     lastDay = day;
-                    fprintf(stderr, "ngay %d: da gui ke hoach, da biet %zu brand\n", day, g_collectedBrands.size());
+                    lastSubmit = chrono::steady_clock::now();
+                    fprintf(stderr, "ngay %d: da gui ke hoach (%d ms lap ke hoach), da biet %zu brand\n", day, g_lastPlanMs, g_collectedBrands.size());
                 } else if (pr.status == 200) {
                     fprintf(stderr, "ngay %d: server tu choi action%s%s\n",
                             day, reason.empty() ? "" : ": ", reason.c_str());
                 }
                 // 429/lỗi: giữ lastDay để vòng sau gửi lại.
             }
-        } else if (r.status != 429 && r.status != 0) {
+        } else if (r.status == 429) {
+            // Bi chan nhip: thoat che do bam sat ngay, quay ve nhip thuong.
+            lastSubmit = chrono::steady_clock::time_point::min();
+        } else if (r.status != 0) {
             auto rr = http::request(base, "GET", "/result", token, "");
             if (rr.status == 200) { fprintf(stderr, "ket thuc tran\n"); break; }
         }
-        sleepMs(POLL_MS);
+        // Ngay sang o dung hai truong hop: moi doi da nop xong (ngay sau khi
+        // MINH nop), hoac het gio ngay. Bam sat ca hai, thua ra o quang giua.
+        auto now = chrono::steady_clock::now();
+        int wait = POLL_MS;
+        bool nearSwitch = false;
+        if (lastSubmit != chrono::steady_clock::time_point::min()) {
+            auto since = chrono::duration_cast<chrono::milliseconds>(now - lastSubmit).count();
+            if (since < BURST_WINDOW_MS) nearSwitch = true;
+        }
+        if (dayLenMs > 0 && dayFirstSeen != chrono::steady_clock::time_point::min()) {
+            auto into = chrono::duration_cast<chrono::milliseconds>(now - dayFirstSeen).count();
+            long long leftMs = dayLenMs - into;
+            if (leftMs <= 1500) nearSwitch = true;          // sap het gio ngay
+            else if (!nearSwitch && leftMs > 3000) wait = IDLE_MS;
+        }
+        if (nearSwitch) wait = BURST_MS;
+        sleepMs(wait);
     }
     return 0;
 }
