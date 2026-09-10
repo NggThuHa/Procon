@@ -12,17 +12,42 @@ if [[ -f .env ]]; then
 fi
 
 BASE="${BASE_URL:-${PROCON_URL:-http://127.0.0.1:8000}}"
-MATCH="${1:-${MATCH_ID:-}}"
-TOKEN="${2:-${API_TOKEN:-}}"
+MATCH=""
+TOKEN=""
 PROXY_HOST="${PROXY_HOST:-127.0.0.1}"
 PROXY_PORT="${PROXY_PORT:-8099}"
 BOT="./hexudon-bot-cpp/bot"
 PROXY_PID=""
 
 usage() {
-  printf 'Usage: %s [MATCH_ID] [API_TOKEN]\n' "$0"
+  printf 'Usage: %s --join MATCH_ID\n' "$0"
+  printf '   or: %s MATCH_ID [API_TOKEN]\n' "$0"
   printf 'Or set BASE_URL, MATCH_ID, API_TOKEN in .env\n'
 }
+
+case "${1:-}" in
+  --join)
+    if [[ $# -ne 2 || -z "${2:-}" ]]; then
+      usage
+      exit 2
+    fi
+    MATCH="$2"
+    TOKEN="${MATCH_TOKEN:-${API_TOKEN:-}}"
+    ;;
+  --*)
+    usage
+    printf 'ERROR: unknown option: %s\n' "$1" >&2
+    exit 2
+    ;;
+  *)
+    if [[ $# -gt 2 ]]; then
+      usage
+      exit 2
+    fi
+    MATCH="${1:-${MATCH_ID:-}}"
+    TOKEN="${2:-${MATCH_TOKEN:-${API_TOKEN:-}}}"
+    ;;
+esac
 
 cleanup() {
   if [[ -n "${PROXY_PID}" ]] && kill -0 "$PROXY_PID" 2>/dev/null; then
